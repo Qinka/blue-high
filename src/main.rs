@@ -103,7 +103,7 @@ fn main() -> ! {
     // ========================================
     // Configure USB peripheral
     let mut gpioa_crh = gpioa.crh;
-    let usb_dm = gpioa.pa11;
+    let usb_dm = gpioa.pa11.into_floating_input(&mut gpioa_crh);
     let usb_dp = gpioa.pa12.into_floating_input(&mut gpioa_crh);
     
     let usb = Peripheral {
@@ -156,9 +156,9 @@ fn main() -> ! {
     delay.delay_ms(100_u32);
 
     // Main loop - transparent data bridge
-    let mut usb_buf = [0u8; 64];
-    let mut lora_buf = [0u8; 64];
-    let mut byte_count: u32 = 0;
+    const BUFFER_SIZE: usize = 64;
+    let mut usb_buf = [0u8; BUFFER_SIZE];
+    let mut lora_buf = [0u8; BUFFER_SIZE];
     
     loop {
         // Poll USB
@@ -171,9 +171,11 @@ fn main() -> ! {
             Ok(count) if count > 0 => {
                 // Send data to LoRa UART
                 for i in 0..count {
-                    block!(tx_lora.write(usb_buf[i])).ok();
+                    if let Err(_) = block!(tx_lora.write(usb_buf[i])) {
+                        // If write fails, stop transmitting this batch
+                        break;
+                    }
                 }
-                byte_count = byte_count.wrapping_add(count as u32);
                 
                 // Update display
                 display.clear(BinaryColor::Off).unwrap();
@@ -190,12 +192,13 @@ fn main() -> ! {
         
         // LoRa -> USB: Read from LoRa and send to USB
         let mut lora_count = 0;
-        for i in 0..64 {
+        for i in 0..BUFFER_SIZE {
             match rx_lora.read() {
                 Ok(byte) => {
                     lora_buf[i] = byte;
                     lora_count += 1;
                 }
+                Err(nb::Error::WouldBlock) => break,
                 Err(_) => break,
             }
         }
@@ -211,7 +214,6 @@ fn main() -> ! {
                     Err(_) => break,
                 }
             }
-            byte_count = byte_count.wrapping_add(lora_count as u32);
             
             // Update display
             display.clear(BinaryColor::Off).unwrap();
