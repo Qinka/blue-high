@@ -6,7 +6,7 @@ STM32F103C8T6 MCU 控制程序 - OLED 和 LoRa 控制器
 
 这是一个使用 Rust 语言开发的 STM32F103C8T6 微控制器程序，能够同时控制：
 - 0.96寸 OLED 屏幕 (SSD1306，通过 I2C 接口)
-- LoRa 无线模块 (SX127x 系列，通过 SPI 接口)
+- 亿佰特 E22-400M30S LoRa 无线模块 (通过 UART 接口)
 
 ## 硬件连接
 
@@ -16,12 +16,12 @@ STM32F103C8T6 MCU 控制程序 - OLED 和 LoRa 控制器
 - VCC -> 3.3V
 - GND -> GND
 
-### LoRa 模块 (SPI)
-- SCK -> PA5
-- MISO -> PA6
-- MOSI -> PA7
-- CS -> PA4
-- RST -> PA3
+### E22-400M30S LoRa 模块 (UART)
+- TXD -> PA10 (STM32 RX)
+- RXD -> PA9 (STM32 TX)
+- M0 -> PA2
+- M1 -> PA3
+- AUX -> PA4 (可选)
 - VCC -> 3.3V
 - GND -> GND
 
@@ -33,9 +33,11 @@ STM32F103C8T6 MCU 控制程序 - OLED 和 LoRa 控制器
    - 显示 LoRa 发送计数器
 
 2. **LoRa 通信**
-   - 配置 433MHz 频率
-   - 发射功率 17 dBm
+   - 使用亿佰特 E22-400M30S 模块
+   - UART 通信，波特率 9600
+   - 支持透明传输模式
    - 周期性发送测试消息
+   - 可接收并显示接收到的数据
 
 ## 开发环境设置
 
@@ -114,7 +116,7 @@ blue-high/
 - `embedded-hal`: 嵌入式硬件抽象接口
 - `ssd1306`: OLED 显示驱动
 - `embedded-graphics`: 嵌入式图形库
-- `sx127x`: LoRa 模块驱动
+- `nb`: 非阻塞 I/O 支持
 - `panic-halt`: 简单的 panic 处理
 
 ## 故障排除
@@ -138,9 +140,12 @@ blue-high/
 
 ### LoRa 通信问题
 
-1. 检查 SPI 接线
+1. 检查 UART 接线（TXD 连 RX，RXD 连 TX）
 2. 确认天线已正确连接
-3. 检查频率设置是否符合当地法规
+3. 检查波特率设置（默认 9600）
+4. 确认 M0 和 M1 引脚电平正确
+5. 使用串口调试工具测试 E22 模块
+6. 检查模块参数配置（频率、信道、地址等）
 
 ## 许可证
 
