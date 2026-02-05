@@ -17,8 +17,9 @@ stm32f1xx-hal = { version = "0.10.0", features = ["stm32f103", "rt"] }
 ssd1306 = "0.8.4"
 embedded-graphics = "0.8.1"
 
-# LoRa driver (SX127x)
-sx127x_lora = "0.3.1"
+# LoRa driver (Ebyte E22 series uses UART)
+# Using embedded-hal traits for UART communication
+nb = "1.0"
 
 [profile.dev]
 opt-level = "s"
