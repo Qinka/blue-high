@@ -17,9 +17,8 @@ stm32f1xx-hal = { version = "0.10.0", features = ["stm32f103", "rt"] }
 ssd1306 = "0.8.4"
 embedded-graphics = "0.8.1"
 
-# LoRa driver (Ebyte E22 series uses UART)
-# Using embedded-hal traits for UART communication
-nb = "1.0"
+# LoRa driver placeholder (E22-400M30S uses SX1268 via SPI)
+# Full driver integration can be added based on specific requirements
 
 [profile.dev]
 opt-level = "s"
