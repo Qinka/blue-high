@@ -49,7 +49,6 @@ dependencies = [
  "cortex-m-rt",
  "embedded-graphics",
  "embedded-hal",
- "nb 1.1.0",
  "panic-halt",
  "ssd1306",
  "stm32f1xx-hal",
