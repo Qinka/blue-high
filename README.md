@@ -72,8 +72,8 @@ rustup target add thumbv7m-none-eabi
 ### 安装调试工具 (可选)
 
 ```bash
-# 安装 probe-run 用于调试和烧录
-cargo install probe-run
+# 安装 probe-rs 用于调试和烧录
+cargo install probe-rs --features cli
 
 # 或者使用 OpenOCD
 sudo apt-get install openocd
@@ -91,7 +91,7 @@ cargo check
 
 ## 烧录程序
 
-### 使用 probe-run (推荐)
+### 使用 probe-rs (推荐)
 
 ```bash
 cargo run --release
