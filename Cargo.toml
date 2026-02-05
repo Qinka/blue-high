@@ -1,0 +1,29 @@
+[package]
+name = "blue-high"
+version = "0.1.0"
+edition = "2021"
+authors = ["Qinka"]
+
+[dependencies]
+cortex-m = "0.7.7"
+cortex-m-rt = "0.7.3"
+panic-halt = "0.2.0"
+embedded-hal = "0.2.7"
+
+# STM32F1 HAL
+stm32f1xx-hal = { version = "0.10.0", features = ["stm32f103", "rt"] }
+
+# OLED display driver (SSD1306 via I2C)
+ssd1306 = "0.8.4"
+embedded-graphics = "0.8.1"
+
+# LoRa driver (SX127x)
+sx127x_lora = "0.3.1"
+
+[profile.dev]
+opt-level = "s"
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
