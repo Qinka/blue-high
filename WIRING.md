@@ -36,7 +36,7 @@
 | NRST      | PA1       | 复位引脚 |
 
 **注意事项：**
-- E22-400M30S 使用 SPI 串口通信，基于 Semtech SX1268 芯片
+- E22-400M30S 使用 SPI 接口通信，基于 Semtech SX1268 芯片
 - SPI 模式：Mode 0 (CPOL=0, CPHA=0)
 - SPI 时钟频率：最大 16 MHz，建议 1 MHz
 - 工作频段: 410-493 MHz
