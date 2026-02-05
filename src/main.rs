@@ -157,12 +157,10 @@ fn main() -> ! {
         }
         
         // Try to read any incoming data (non-blocking)
-        let mut rx_data = [0u8; 64];
         let mut rx_count = 0;
-        for i in 0..64 {
+        for _ in 0..64 {
             match rx_uart.read() {
-                Ok(byte) => {
-                    rx_data[i] = byte;
+                Ok(_byte) => {
                     rx_count += 1;
                 }
                 Err(_) => break,
