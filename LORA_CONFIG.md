@@ -20,9 +20,10 @@ pub const CURRENT_CONFIG: LoRaConfig = LoRaConfig::default();
 
 1. **默认配置** - `LoRaConfig::default()`
    - 433 MHz 频率
-   - 17 dBm 发射功率（约 50mW）
-   - 125 kHz 带宽
-   - SF10 扩频因子
+   - 30 dBm 发射功率（1W，最大功率）
+   - 500 kHz 带宽（宽带）
+   - SF11 扩频因子
+   - CR4/5 编码率
    - 适用于大多数应用场景
 
 2. **长距离模式** - `LoRaConfig::long_range()`
@@ -30,13 +31,15 @@ pub const CURRENT_CONFIG: LoRaConfig = LoRaConfig::default();
    - 30 dBm 发射功率（1W，最大功率）
    - 125 kHz 带宽（窄带）
    - SF12 扩频因子（最大扩频）
+   - CR4/8 编码率（最强纠错）
    - 适用于需要最大传输距离的场景
 
 3. **快速模式** - `LoRaConfig::fast_mode()`
    - 433 MHz 频率
-   - 17 dBm 发射功率
+   - 27 dBm 发射功率
    - 500 kHz 带宽（宽带）
    - SF7 扩频因子（最小扩频）
+   - CR4/5 编码率（最少冗余）
    - 适用于需要高速率、短距离传输的场景
 
 4. **低功耗模式** - `LoRaConfig::low_power()`
@@ -44,6 +47,7 @@ pub const CURRENT_CONFIG: LoRaConfig = LoRaConfig::default();
    - 10 dBm 发射功率（约 10mW，最低功率）
    - 125 kHz 带宽
    - SF9 扩频因子
+   - CR4/7 编码率
    - 适用于电池供电或低功耗应用
 
 **示例：切换到长距离模式**
@@ -66,6 +70,8 @@ pub const CURRENT_CONFIG: LoRaConfig = LoRaConfig {
     preamble_length: 10,                     // 10 符号前导码
     crc_enabled: true,                       // 启用 CRC
     explicit_header: true,                   // 显式头部
+    sync_word: 0x14,                         // 私网同步字
+    pa_config: PaConfig::default(),          // 默认 PA 配置
 };
 ```
 
