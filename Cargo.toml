@@ -10,9 +10,9 @@ cortex-m-rt = "0.7.5"
 embedded-hal = "1.0"
 portable-atomic = { version = "1.10", features = ["critical-section"] }
 
-# Logging and debugging infrastructure for probe-rs via SWO
+# Logging and debugging infrastructure for probe-rs via RTT
 defmt = "1.0"
-defmt-itm = "0.4"
+defmt-rtt = "0.4"
 panic-probe = { version = "0.3", features = ["print-defmt"] }
 
 # STM32F1 HAL - updated to 0.11.0
