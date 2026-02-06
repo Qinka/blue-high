@@ -5,6 +5,9 @@
 use defmt_rtt as _;
 use panic_probe as _;
 
+// 使用 defmt 进行日志输出
+use defmt;
+
 mod diagnostics;
 use diagnostics::BlueHighDiagnostics as Diag;
 
@@ -36,6 +39,11 @@ use usbd_serial::{SerialPort, USB_CLASS_CDC};
 
 #[entry]
 fn main() -> ! {
+    // 立即输出第一条日志 - 这应该总是工作
+    defmt::info!("=== Blue-High 启动 ===");
+    defmt::info!("版本: 0.1.0");
+    defmt::info!("MCU: STM32F103C8T6");
+    
     Diag::boot_sequence("STM32F103C8T6 初始化开始");
     
     // Get access to the device specific peripherals from the peripheral access crate
