@@ -5,15 +5,16 @@ edition = "2021"
 authors = ["Qinka"]
 
 [dependencies]
-cortex-m = { version = "0.7.7", features = ["critical-section-single-core"] }
-cortex-m-rt = "0.7.5"
+cortex-m = { version = "0.7", features = ["critical-section-single-core"] }
+cortex-m-rt = "0.7"
 embedded-hal = "1.0"
 portable-atomic = { version = "1.10", features = ["critical-section"] }
 
 # Logging and debugging infrastructure for probe-rs via RTT
 defmt = "1.0"
-defmt-rtt = "1.1"
-panic-probe = { version = "0.3", features = ["print-defmt"] }
+# defmt-rtt = "1.1"
+panic-probe = { version = "1.0", features = ["defmt"] }
+rtt-target = { version = "0.6.2", features = ["defmt"] }
 
 # STM32F1 HAL - updated to 0.11.0
 stm32f1xx-hal = { version = "0.11.0", features = ["stm32f103"] }
@@ -27,7 +28,7 @@ usb-device = "0.3.2"
 usbd-serial = "0.2.2"
 
 # String formatting without heap allocation
-heapless = "0.8"
+heapless = "0.9"
 
 [profile.dev]
 opt-level = "s"
