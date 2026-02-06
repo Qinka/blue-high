@@ -1,8 +1,8 @@
 #![no_std]
 #![no_main]
 
-// Blue-High 调试基础设施
-use defmt_rtt as _;
+// Blue-High 调试基础设施 - 使用 SWO/ITM 输出
+use defmt_itm as _;
 use panic_probe as _;
 
 mod diagnostics;
