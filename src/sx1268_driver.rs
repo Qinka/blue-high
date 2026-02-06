@@ -52,6 +52,7 @@ mod commands {
     pub const CLR_DEVICE_ERRORS: u8 = 0x07;
     pub const GET_STATUS: u8 = 0xC0;
     pub const SET_LORA_SYMB_NUM_TIMEOUT: u8 = 0xA0;
+    pub const SET_BUFFER_BASE_ADDRESS: u8 = 0x8F;
 }
 
 /// SX1268 驱动器
@@ -114,10 +115,14 @@ where
         // 6. 开启 TCXO (E22 使用 3.3V TCXO)
         self.set_dio3_as_tcxo(0x07, 320)?; // 3.3V, 10ms timeout
         
-        // 7. 校准
+        // 7. 设置缓冲区基地址
+        self.set_buffer_base_address(0x00, 0x00)?; // TX=0x00, RX=0x00
+        defmt::info!("[SX1268] ✓ 缓冲区基地址设置完成");
+        
+        // 8. 校准
         self.calibrate(0x7F)?; // 校准所有
         
-        // 8. 设置数据包类型为 LoRa
+        // 9. 设置数据包类型为 LoRa
         self.set_packet_type(0x01)?; // 0x01 = LoRa
         
         // 9. 设置射频频率
@@ -137,7 +142,8 @@ where
         self.set_tx_params(chip_power, 0x04)?; // 0x04 = 40us ramp
         
         // 12. 设置 RX/TX 完成后的状态
-        self.set_rx_tx_fallback_mode(0x20)?; // 0x20 = STDBY_RC
+        self.set_rx_tx_fallback_mode(0x40)?; // 0x40 = STDBY_RC
+        defmt::info!("[SX1268] ✓ FALLBACK 模式配置完成");
         
         // 13. 设置 LoRa 调制参数
         self.set_lora_mod_params(config)?;
@@ -177,17 +183,23 @@ where
         
         // 6. 切换 RF 开关到发送
         self.hal.rf_switch_tx();
+        defmt::info!("[SX1268] RF 开关 -> TX");
         
-        // 7. 进入发送模式
-        self.set_tx(0x000000)?; // No timeout
+        // 7. 进入发送模式（使用合理的超时值）
+        // 超时计算: 15.625μs per tick, 0x001900 = 6400 ticks = 100ms
+        let timeout = 0x001900; // 100ms timeout
+        self.set_tx(timeout)?;
+        defmt::info!("[SX1268] → 进入发送模式 (超时: 0x{:06X})", timeout);
         
         // 8. 等待发送完成 (简化处理，实际应该检查中断)
         delay_fn(TX_COMPLETION_DELAY_MS);
+        defmt::info!("[SX1268] ⏳ 等待发送完成 ({}ms)", TX_COMPLETION_DELAY_MS);
         
         // 9. 关闭 RF 开关
         self.hal.rf_switch_off();
+        defmt::info!("[SX1268] RF 开关 -> OFF");
         
-        defmt::info!("[SX1268] 发送完成");
+        defmt::info!("[SX1268] ✓ 发送完成");
         Ok(())
     }
 
@@ -234,6 +246,14 @@ where
 
     fn calibrate(&mut self, param: u8) -> Result<(), ()> {
         let cmd = [commands::CALIBRATE, param];
+        match self.hal.write(&cmd, &[]) {
+            Sx1268HalStatus::Ok => Ok(()),
+            _ => Err(()),
+        }
+    }
+
+    fn set_buffer_base_address(&mut self, tx_base: u8, rx_base: u8) -> Result<(), ()> {
+        let cmd = [commands::SET_BUFFER_BASE_ADDRESS, tx_base, rx_base];
         match self.hal.write(&cmd, &[]) {
             Sx1268HalStatus::Ok => Ok(()),
             _ => Err(()),
