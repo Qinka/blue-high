@@ -4,7 +4,14 @@ target = "thumbv7m-none-eabi"
 [target.thumbv7m-none-eabi]
 rustflags = [
   "-C", "link-arg=-Tlink.x",
+  "-C", "link-arg=-Tdefmt.x",
 ]
 
 [target.'cfg(all(target_arch = "arm", target_os = "none"))']
-runner = "probe-rs run --chip STM32F103C8"
+runner = "probe-rs run --chip STM32F103C8Tx"
+
+
+
+[env]
+DEFMT_LOG = "info"
+CHIPSERIE = "stm32f103"
