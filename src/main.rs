@@ -8,6 +8,9 @@ use panic_probe as _;
 mod diagnostics;
 use diagnostics::BlueHighDiagnostics as Diag;
 
+mod lora_config;
+use lora_config::{LoRaConfig, CURRENT_CONFIG};
+
 use cortex_m_rt::entry;
 use stm32f1xx_hal::{
     pac,
@@ -184,18 +187,69 @@ fn main() -> ! {
     delay.delay_ms(10_u32);
 
     Diag::boot_sequence("E22-400M30S LoRa 模块就绪");
+    
+    // ========================================
+    // LoRa 配置加载
+    // ========================================
+    // 用户可以在 src/lora_config.rs 中修改 CURRENT_CONFIG 来改变 LoRa 参数
+    let lora_cfg = CURRENT_CONFIG;
+    
+    // 打印配置信息到调试日志
+    defmt::info!("╔══════════════════════════════════╗");
+    defmt::info!("║      E22-400M30S LoRa 配置       ║");
+    defmt::info!("╠══════════════════════════════════╣");
+    defmt::info!("║ 频率: {} MHz ({}Hz)", lora_cfg.get_frequency_mhz(), lora_cfg.get_frequency_hz());
+    defmt::info!("║ 功率: {} dBm (2级输出)", lora_cfg.get_power_dbm());
+    defmt::info!("║       {} dBm (1级芯片)", lora_cfg.get_chip_power_dbm());
+    defmt::info!("║ 带宽: {} kHz", lora_cfg.get_bandwidth_khz());
+    defmt::info!("║ 扩频因子: SF{}", lora_cfg.get_sf());
+    defmt::info!("║ 编码率: CR4/{}", lora_cfg.get_cr_ratio());
+    defmt::info!("║ 前导码: {} 符号", lora_cfg.preamble_length);
+    defmt::info!("║ CRC: {}", if lora_cfg.crc_enabled { "启用" } else { "禁用" });
+    defmt::info!("║ 头部: {}", if lora_cfg.explicit_header { "显式" } else { "隐式" });
+    defmt::info!("║ 同步字: 0x{:02X} ({})", lora_cfg.sync_word, 
+        if lora_cfg.sync_word == 0x12 { "公网" } else { "私网" });
+    defmt::info!("║ PA 配置: duty={:02X} hp={:02X}", 
+        lora_cfg.pa_config.pa_duty_cycle, lora_cfg.pa_config.hp_max);
+    defmt::info!("╚══════════════════════════════════╝");
 
-    // Display status
+    // Display status with configuration
     display.clear(BinaryColor::Off).unwrap();
-    Text::with_baseline("USB-LoRa SPI", Point::new(0, 0), text_style, Baseline::Top)
+    Text::with_baseline("E22 LoRa", Point::new(0, 0), text_style, Baseline::Top)
         .draw(&mut display)
         .unwrap();
-    Text::with_baseline("E22 Ready", Point::new(0, 12), text_style, Baseline::Top)
+    
+    // 创建配置信息字符串
+    use core::fmt::Write;
+    let mut freq_str = heapless::String::<16>::new();
+    let mut power_str = heapless::String::<16>::new();
+    let mut bw_str = heapless::String::<16>::new();
+    let mut sf_cr_str = heapless::String::<20>::new();
+    
+    write!(&mut freq_str, "{}MHz", lora_cfg.get_frequency_mhz()).ok();
+    write!(&mut power_str, "{}dBm", lora_cfg.get_power_dbm()).ok();
+    write!(&mut bw_str, "BW{}k", lora_cfg.get_bandwidth_khz()).ok();
+    write!(&mut sf_cr_str, "SF{} CR4/{}", lora_cfg.get_sf(), lora_cfg.get_cr_ratio()).ok();
+    
+    Text::with_baseline(freq_str.as_str(), Point::new(0, 12), text_style, Baseline::Top)
         .draw(&mut display)
         .unwrap();
-    Text::with_baseline("72MHz", Point::new(0, 24), text_style, Baseline::Top)
+    Text::with_baseline(power_str.as_str(), Point::new(60, 12), text_style, Baseline::Top)
         .draw(&mut display)
         .unwrap();
+    Text::with_baseline(bw_str.as_str(), Point::new(0, 24), text_style, Baseline::Top)
+        .draw(&mut display)
+        .unwrap();
+    Text::with_baseline(sf_cr_str.as_str(), Point::new(0, 36), text_style, Baseline::Top)
+        .draw(&mut display)
+        .unwrap();
+    
+    // 显示网络类型
+    let net_type = if lora_cfg.sync_word == 0x12 { "Public" } else { "Private" };
+    Text::with_baseline(net_type, Point::new(0, 48), text_style, Baseline::Top)
+        .draw(&mut display)
+        .unwrap();
+    
     display.flush().unwrap();
     
     delay.delay_ms(100_u32);
