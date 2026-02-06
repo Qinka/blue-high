@@ -14,6 +14,11 @@ use diagnostics::BlueHighDiagnostics as Diag;
 mod lora_config;
 use lora_config::{LoRaConfig, CURRENT_CONFIG};
 
+mod sx1268_hal;
+mod sx1268_driver;
+use sx1268_hal::Sx1268Context;
+use sx1268_driver::Sx1268Driver;
+
 use cortex_m_rt::entry;
 use stm32f1xx_hal::{
     pac,
@@ -153,29 +158,32 @@ fn main() -> ! {
     Diag::boot_sequence("USB CDC 虚拟串口已配置");
 
     // ========================================
-    // E22-400M30S LoRa SPI Setup
+    // E22-400M30S LoRa SPI Setup with SX1268 Driver
     // ========================================
     // The E22-400M30S uses SPI communication with SX1268 chip
     // SPI pins: SCK = PA5, MISO = PA6, MOSI = PA7
     // Control pins: NSS = PA4, BUSY = PA3, DIO1 = PA2, NRST = PA1
+    // RF Switch: TXEN = PB0, RXEN = PB1 (based on typical E22 design)
 
     // SPI pins configuration
     let sck = gpioa.pa5.into_alternate_push_pull(&mut gpioa.crl);
     let miso = gpioa.pa6;
     let mosi = gpioa.pa7.into_alternate_push_pull(&mut gpioa.crl);
 
-    // Control pins
-    let mut nss = gpioa.pa4.into_push_pull_output(&mut gpioa.crl);
-    // Note: BUSY and DIO1 pins are available for future SX1268 driver integration
-    // BUSY should be checked before SPI transactions
-    // DIO1 can be used for interrupt-driven event handling
-    let _busy = gpioa.pa3.into_floating_input(&mut gpioa.crl);
+    // SX1268 Control pins
+    let nss = gpioa.pa4.into_push_pull_output(&mut gpioa.crl);
+    let busy = gpioa.pa3.into_floating_input(&mut gpioa.crl);
     let _dio1 = gpioa.pa2.into_floating_input(&mut gpioa.crl);
-    let mut nrst = gpioa.pa1.into_push_pull_output(&mut gpioa.crl);
+    let nrst = gpioa.pa1.into_push_pull_output(&mut gpioa.crl);
+    
+    // RF Switch control pins (TXEN/RXEN)
+    // Note: E22 module may have internal RF switch control
+    // If not exposed, these pins can be configured as dummy outputs
+    let txen = gpiob.pb0.into_push_pull_output(&mut gpiob.crl);
+    let rxen = gpiob.pb1.into_push_pull_output(&mut gpiob.crl);
 
     // Configure SPI1
-    // Note: pins are wrapped in Option to support partial configurations (e.g., NoMiso for write-only)
-    let mut spi = Spi::new(
+    let spi = Spi::new(
         dp.SPI1,
         (Some(sck), Some(miso), Some(mosi)),
         SpiMode {
@@ -186,21 +194,16 @@ fn main() -> ! {
         &mut rcc,
     );
 
-    // Initialize E22-400M30S control pins
-    nss.set_high(); // Deselect initially
-    nrst.set_high(); // Keep module active
+    // Create SX1268 HAL context
+    let sx1268_ctx = Sx1268Context::new(spi, nss, nrst, busy, txen, rxen);
+    
+    // Create SX1268 driver
+    let mut sx1268 = Sx1268Driver::new(sx1268_ctx);
 
-    // Reset sequence for SX1268
-    Diag::e22_reset();
-    nrst.set_low();
-    delay.delay_ms(10_u32);
-    nrst.set_high();
-    delay.delay_ms(10_u32);
-
-    Diag::boot_sequence("E22-400M30S LoRa 模块就绪");
+    Diag::boot_sequence("E22-400M30S SX1268 驱动创建完成");
 
     // ========================================
-    // LoRa 配置加载
+    // LoRa 配置加载和初始化
     // ========================================
     // 用户可以在 src/lora_config.rs 中修改 CURRENT_CONFIG 来改变 LoRa 参数
     let lora_cfg = CURRENT_CONFIG;
@@ -223,6 +226,19 @@ fn main() -> ! {
     defmt::info!("║ PA 配置: duty={:02X} hp={:02X}",
         lora_cfg.pa_config.pa_duty_cycle, lora_cfg.pa_config.hp_max);
     defmt::info!("╚══════════════════════════════════╝");
+
+    // 初始化 SX1268 芯片
+    let mut delay_fn = |ms: u32| delay.delay_ms(ms);
+    match sx1268.init(&lora_cfg, &mut delay_fn) {
+        Ok(_) => {
+            defmt::info!("[SX1268] ✅ 初始化成功");
+            Diag::boot_sequence("SX1268 LoRa 芯片初始化完成");
+        }
+        Err(_) => {
+            defmt::error!("[SX1268] ❌ 初始化失败");
+            Diag::error_occurred("SX1268 初始化失败");
+        }
+    }
 
     // Display status with configuration
     display.clear(BinaryColor::Off).unwrap();
@@ -267,20 +283,20 @@ fn main() -> ! {
 
     Diag::boot_sequence("系统初始化完成，进入主循环");
 
-    // Main loop - USB to SPI bridge for LoRa control
+    // Main loop - USB to LoRa bridge with SX1268 driver
     const BUFFER_SIZE: usize = 64;
     let mut usb_buf = [0u8; BUFFER_SIZE];
     let mut loop_counter: u32 = 0;
 
     loop {
         loop_counter = loop_counter.wrapping_add(1);
-        // Diag::heartbeat(loop_counter);
+        
         // Poll USB
         if !usb_dev.poll(&mut [&mut serial]) {
             continue;
         }
 
-        // USB -> LoRa SPI: Read from USB and send to LoRa via SPI
+        // USB -> LoRa: Read from USB and send via SX1268
         match serial.read(&mut usb_buf) {
             Ok(count) if count > 0 => {
                 Diag::usb_bridge_rx(count);
@@ -288,36 +304,55 @@ fn main() -> ! {
                 // 显示接收到的 USB 数据详细内容（十六进制和 ASCII）
                 Diag::usb_data_received(&usb_buf[0..count]);
 
-                // Send data to LoRa via SPI (more efficient batch transfer)
-                Diag::spi_chip_select(true);
-                nss.set_low(); // Select chip
-
-                // Transfer all bytes in one SPI transaction for efficiency
-                if let Ok(_) = spi.transfer(&mut usb_buf[0..count]) {
-                    Diag::e22_spi_transfer(count);
-                } else {
-                    Diag::error_occurred("SPI 传输失败");
+                // 使用 SX1268 驱动发送 LoRa 数据
+                defmt::info!("[主循环] 准备通过 LoRa 发送 {} 字节", count);
+                
+                let mut delay_fn = |ms: u32| delay.delay_ms(ms);
+                match sx1268.transmit(&usb_buf[0..count], &mut delay_fn) {
+                    Ok(_) => {
+                        defmt::info!("[主循环] ✅ LoRa 发送成功");
+                        
+                        // Update display
+                        display.clear(BinaryColor::Off).unwrap();
+                        Text::with_baseline("USB->LoRa", Point::new(0, 0), text_style, Baseline::Top)
+                            .draw(&mut display)
+                            .unwrap();
+                        Text::with_baseline("TX Success", Point::new(0, 12), text_style, Baseline::Top)
+                            .draw(&mut display)
+                            .unwrap();
+                        
+                        // 显示发送的字节数
+                        use core::fmt::Write;
+                        let mut bytes_str = heapless::String::<20>::new();
+                        write!(&mut bytes_str, "{} bytes", count).ok();
+                        Text::with_baseline(bytes_str.as_str(), Point::new(0, 24), text_style, Baseline::Top)
+                            .draw(&mut display)
+                            .unwrap();
+                        
+                        display.flush().unwrap();
+                    }
+                    Err(_) => {
+                        defmt::error!("[主循环] ❌ LoRa 发送失败");
+                        Diag::error_occurred("LoRa 发送失败");
+                        
+                        // Update display
+                        display.clear(BinaryColor::Off).unwrap();
+                        Text::with_baseline("LoRa TX", Point::new(0, 0), text_style, Baseline::Top)
+                            .draw(&mut display)
+                            .unwrap();
+                        Text::with_baseline("Failed!", Point::new(0, 12), text_style, Baseline::Top)
+                            .draw(&mut display)
+                            .unwrap();
+                        display.flush().unwrap();
+                    }
                 }
-
-                nss.set_high(); // Deselect chip
-                Diag::spi_chip_select(false);
-
-                // Update display
-                display.clear(BinaryColor::Off).unwrap();
-                Text::with_baseline("USB->LoRa", Point::new(0, 0), text_style, Baseline::Top)
-                    .draw(&mut display)
-                    .unwrap();
-                Text::with_baseline("SPI TX", Point::new(0, 12), text_style, Baseline::Top)
-                    .draw(&mut display)
-                    .unwrap();
-                display.flush().unwrap();
             }
             _ => {
-                info!("USB 无数据接收");
+                // 无数据，继续轮询
             }
         }
 
         // For SPI-based LoRa, data reception would require polling the module
-        // or using DIO1 interrupt. This is a simplified example showing USB control
+        // or using DIO1 interrupt. This is a simplified transmit-only example.
     }
 }
