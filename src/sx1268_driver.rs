@@ -65,6 +65,11 @@ where
     RXEN: OutputPin,
 {
     hal: Sx1268Context<SPI, NSS, NRST, BUSY, TXEN, RXEN>,
+    /// 保存的数据包参数配置
+    preamble_length: u16,
+    header_type: u8,
+    crc_enabled: bool,
+    invert_iq: bool,
 }
 
 impl<SPI, NSS, NRST, BUSY, TXEN, RXEN> Sx1268Driver<SPI, NSS, NRST, BUSY, TXEN, RXEN>
@@ -78,7 +83,13 @@ where
 {
     /// 创建新的驱动实例
     pub fn new(context: Sx1268Context<SPI, NSS, NRST, BUSY, TXEN, RXEN>) -> Self {
-        Self { hal: context }
+        Self {
+            hal: context,
+            preamble_length: 8,
+            header_type: 0x00, // Explicit header
+            crc_enabled: true,
+            invert_iq: false,
+        }
     }
 
     /// 初始化 SX1268 芯片
@@ -306,6 +317,12 @@ where
         let crc = if config.crc_enabled { 0x01 } else { 0x00 };
         let invert_iq = 0x00;
         
+        // 保存参数以便后续发送时使用
+        self.preamble_length = config.preamble_length;
+        self.header_type = header_type;
+        self.crc_enabled = config.crc_enabled;
+        self.invert_iq = false;
+        
         let data = [preamble[0], preamble[1], header_type, payload_len, crc, invert_iq];
         let cmd = [commands::SET_PACKET_PARAMS];
         match self.hal.write(&cmd, &data) {
@@ -315,13 +332,16 @@ where
     }
 
     fn update_packet_length(&mut self, payload_len: u8) -> Result<(), ()> {
-        // Update only the payload length field (byte 3) in packet params
-        // This is more efficient than resetting all params
-        let data = [0x00, 0x00, 0x00, payload_len, 0x00, 0x00]; // Dummy values, only byte 3 matters
+        // 使用保存的参数，只更新payload长度
+        let preamble = self.preamble_length.to_be_bytes();
+        let crc = if self.crc_enabled { 0x01 } else { 0x00 };
+        let invert_iq = if self.invert_iq { 0x01 } else { 0x00 };
+        
+        let data = [preamble[0], preamble[1], self.header_type, payload_len, crc, invert_iq];
         let cmd = [commands::SET_PACKET_PARAMS];
         match self.hal.write(&cmd, &data) {
             Sx1268HalStatus::Ok => {
-                defmt::debug!("[SX1268] 数据包长度更新: {} 字节", payload_len);
+                defmt::debug!("[SX1268] 数据包长度更新: {} 字节 (保留其他参数)", payload_len);
                 Ok(())
             },
             _ => Err(()),
