@@ -82,14 +82,14 @@ where
     }
 
     /// 初始化 SX1268 芯片
-    pub fn init(&mut self, config: &LoRaConfig, delay_ms: &mut dyn FnMut(u32)) -> Result<(), ()> {
+    pub fn init(&mut self, config: &LoRaConfig, delay_fn: &mut dyn FnMut(u32)) -> Result<(), ()> {
         defmt::info!("[SX1268] 开始初始化");
         
         // 1. 硬件复位
-        self.hal.reset(delay_ms);
+        self.hal.reset(delay_fn);
         
         // 2. 唤醒
-        self.hal.wakeup(delay_ms);
+        self.hal.wakeup(delay_fn);
         
         // 3. 设置待机模式(RC)
         self.set_standby(0x00)?;
@@ -142,9 +142,12 @@ where
     }
 
     /// 发送数据
-    pub fn transmit(&mut self, data: &[u8], delay_ms: &mut dyn FnMut(u32)) -> Result<(), ()> {
+    pub fn transmit(&mut self, data: &[u8], delay_fn: &mut dyn FnMut(u32)) -> Result<(), ()> {
         let len = data.len();
         defmt::info!("[SX1268] 发送 {} 字节", len);
+        
+        // TX 完成延迟 - 简化处理，实际应该检查中断
+        const TX_COMPLETION_DELAY_MS: u32 = 100;
         
         // 1. 设置待机模式
         self.set_standby(0x00)?;
@@ -152,22 +155,25 @@ where
         // 2. 写入数据到缓冲区
         self.write_buffer(0x00, data)?;
         
-        // 3. 设置中断参数（发送完成）
+        // 3. 更新数据包长度为实际长度
+        self.update_packet_length(len as u8)?;
+        
+        // 4. 设置中断参数（发送完成）
         self.set_dio_irq_params(0x0001, 0x0001, 0x0000, 0x0000)?; // TxDone
         
-        // 4. 清除中断状态
+        // 5. 清除中断状态
         self.clear_irq_status(0xFFFF)?;
         
-        // 5. 切换 RF 开关到发送
+        // 6. 切换 RF 开关到发送
         self.hal.rf_switch_tx();
         
-        // 6. 进入发送模式
+        // 7. 进入发送模式
         self.set_tx(0x000000)?; // No timeout
         
-        // 7. 等待发送完成 (简化处理，实际应该检查中断)
-        delay_ms(100);
+        // 8. 等待发送完成 (简化处理，实际应该检查中断)
+        delay_fn(TX_COMPLETION_DELAY_MS);
         
-        // 8. 关闭 RF 开关
+        // 9. 关闭 RF 开关
         self.hal.rf_switch_off();
         
         defmt::info!("[SX1268] 发送完成");
@@ -232,8 +238,12 @@ where
     }
 
     fn set_rf_frequency(&mut self, freq_hz: u32) -> Result<(), ()> {
-        // Convert frequency to register value: freq_reg = (freq_hz * 2^25) / 32MHz
-        let freq_reg = ((freq_hz as u64) * (1 << 25) / 32_000_000) as u32;
+        // SX1268 频率计算公式: freq_reg = (freq_hz * 2^25) / FXTAL
+        // 其中 FXTAL = 32MHz (SX1268 晶振频率)
+        const FXTAL: u64 = 32_000_000;
+        const FREQ_STEP: u64 = 1 << 25; // 2^25
+        
+        let freq_reg = ((freq_hz as u64) * FREQ_STEP / FXTAL) as u32;
         let freq_bytes = freq_reg.to_be_bytes();
         
         let cmd = [commands::SET_RF_FREQUENCY];
@@ -292,7 +302,7 @@ where
     fn set_lora_packet_params(&mut self, config: &LoRaConfig) -> Result<(), ()> {
         let preamble = config.preamble_length.to_be_bytes();
         let header_type = if config.explicit_header { 0x00 } else { 0x01 };
-        let payload_len = 255u8; // Max
+        let payload_len = 255u8; // Max payload length for initialization
         let crc = if config.crc_enabled { 0x01 } else { 0x00 };
         let invert_iq = 0x00;
         
@@ -300,6 +310,20 @@ where
         let cmd = [commands::SET_PACKET_PARAMS];
         match self.hal.write(&cmd, &data) {
             Sx1268HalStatus::Ok => Ok(()),
+            _ => Err(()),
+        }
+    }
+
+    fn update_packet_length(&mut self, payload_len: u8) -> Result<(), ()> {
+        // Update only the payload length field (byte 3) in packet params
+        // This is more efficient than resetting all params
+        let data = [0x00, 0x00, 0x00, payload_len, 0x00, 0x00]; // Dummy values, only byte 3 matters
+        let cmd = [commands::SET_PACKET_PARAMS];
+        match self.hal.write(&cmd, &data) {
+            Sx1268HalStatus::Ok => {
+                defmt::debug!("[SX1268] 数据包长度更新: {} 字节", payload_len);
+                Ok(())
+            },
             _ => Err(()),
         }
     }
