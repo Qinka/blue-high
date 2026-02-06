@@ -287,6 +287,9 @@ fn main() -> ! {
     const BUFFER_SIZE: usize = 64;
     let mut usb_buf = [0u8; BUFFER_SIZE];
     let mut loop_counter: u32 = 0;
+    
+    // Create delay closure once outside the loop
+    let mut delay_fn = |ms: u32| delay.delay_ms(ms);
 
     loop {
         loop_counter = loop_counter.wrapping_add(1);
@@ -307,7 +310,6 @@ fn main() -> ! {
                 // 使用 SX1268 驱动发送 LoRa 数据
                 defmt::info!("[主循环] 准备通过 LoRa 发送 {} 字节", count);
                 
-                let mut delay_fn = |ms: u32| delay.delay_ms(ms);
                 match sx1268.transmit(&usb_buf[0..count], &mut delay_fn) {
                     Ok(_) => {
                         defmt::info!("[主循环] ✅ LoRa 发送成功");
