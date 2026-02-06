@@ -99,22 +99,40 @@ where
         
         // 1. 硬件复位
         self.hal.reset(delay_fn);
+        defmt::info!("[SX1268] ✓ 硬件复位完成");
         
         // 2. 唤醒
         self.hal.wakeup(delay_fn);
+        defmt::info!("[SX1268] ✓ 唤醒完成");
         
-        // 3. 设置待机模式(RC)
+        // 3. 清除设备错误
+        self.clear_device_errors()?;
+        defmt::info!("[SX1268] ✓ 清除设备错误");
+        
+        // 4. 设置待机模式(RC)
         self.set_standby(0x00)?;
+        defmt::info!("[SX1268] ✓ 待机模式 (RC)");
         
-        // 4. 设置内部电源模式 (DCDC)
+        // 5. SPI 通信测试 - 写入并读回寄存器验证
+        self.spi_test()?;
+        defmt::info!("[SX1268] ✓ SPI 通信测试通过");
+        
+        // 6. 设置内部电源模式 (DCDC)
         self.set_regulator_mode(0x01)?;
+        defmt::info!("[SX1268] ✓ 内部电源模式 (DCDC)");
         
-        // 5. 启用 DIO2 控制射频开关 (E22-400M30S 内部使用 DIO2)
-        self.set_dio2_as_rf_switch(true)?;
-        defmt::info!("[SX1268] ✓ DIO2 作为 RF 开关已启用");
+        // 7. 禁用 DIO2 控制射频开关
+        // E22-400M30S 使用外部 TXEN/RXEN 控制，不使用 DIO2
+        self.set_dio2_as_rf_switch(false)?;
+        defmt::info!("[SX1268] ✓ DIO2 RF 开关已禁用 (使用外部 TXEN/RXEN)");
         
-        // 6. 开启 TCXO (E22 使用 3.3V TCXO)
+        // 8. 开启 TCXO (E22 使用 3.3V TCXO)
         self.set_dio3_as_tcxo(0x07, 320)?; // 3.3V, 10ms timeout
+        defmt::info!("[SX1268] ✓ TCXO 配置完成 (3.3V, 10ms)");
+        
+        // 9. 检查 XOSC 启动
+        self.check_xosc_start()?;
+        defmt::info!("[SX1268] ✓ XOSC 启动正常");
         
         // 7. 设置缓冲区基地址
         self.set_buffer_base_address(0x00, 0x00)?; // TX=0x00, RX=0x00
@@ -169,12 +187,15 @@ where
         
         // 1. 设置待机模式
         self.set_standby(0x00)?;
+        defmt::debug!("[SX1268] → 待机模式");
         
         // 2. 写入数据到缓冲区
         self.write_buffer(0x00, data)?;
+        defmt::debug!("[SX1268] → 数据写入缓冲区");
         
         // 3. 更新数据包长度为实际长度
         self.update_packet_length(len as u8)?;
+        defmt::debug!("[SX1268] → 数据包长度: {} 字节", len);
         
         // 4. 设置中断参数（发送完成）
         self.set_dio_irq_params(0x0001, 0x0001, 0x0000, 0x0000)?; // TxDone
@@ -182,16 +203,38 @@ where
         // 5. 清除中断状态
         self.clear_irq_status(0xFFFF)?;
         
-        // 6. 进入发送模式 (DIO2 自动控制 RF 开关)
-        // E22-400M30S 内部 RF 开关由 DIO2 自动控制，无需手动切换
+        // 6. 手动切换 RF 开关到 TX 模式
+        // E22-400M30S 使用外部 TXEN/RXEN 引脚控制
+        match self.hal.rf_switch_tx() {
+            Sx1268HalStatus::Ok => {}
+            _ => return Err(()),
+        }
+        defmt::info!("[SX1268] → RF 开关切换到 TX");
+        
+        // 7. 进入发送模式
         // 超时计算: 15.625μs per tick, 0x002710 = 10000 ticks = 156.25ms
         let timeout = 0x002710; // ~156ms timeout
-        defmt::info!("[SX1268] → 进入发送模式 (超时: 0x{:06X} ~156ms)", timeout);
         self.set_tx(timeout)?;
+        defmt::info!("[SX1268] → 进入发送模式 (超时: 0x{:06X} ~156ms)", timeout);
         
-        // 7. 等待发送完成 (简化处理，实际应该检查中断)
+        // 8. 验证芯片状态
+        if let Ok(status) = self.get_status() {
+            let mode = (status >> 4) & 0x07;
+            let cmd_status = (status >> 1) & 0x07;
+            defmt::info!("[SX1268] 状态验证: 模式={}, 命令状态={}", mode, cmd_status);
+            // 模式应该是 3 (TX), 命令状态应该是 1 (success)
+        }
+        
+        // 9. 等待发送完成 (简化处理，实际应该检查中断)
         defmt::info!("[SX1268] ⏳ 等待发送完成 ({}ms)", TX_COMPLETION_DELAY_MS);
         delay_fn(TX_COMPLETION_DELAY_MS);
+        
+        // 10. 关闭 RF 开关
+        match self.hal.rf_switch_off() {
+            Sx1268HalStatus::Ok => {}
+            _ => return Err(()),
+        }
+        defmt::info!("[SX1268] → RF 开关关闭");
         
         defmt::info!("[SX1268] ✓ 发送完成");
         Ok(())
@@ -408,6 +451,112 @@ where
         let timeout_bytes = [(timeout >> 16) as u8, (timeout >> 8) as u8, timeout as u8];
         let cmd = [commands::SET_TX];
         match self.hal.write(&cmd, &timeout_bytes) {
+            Sx1268HalStatus::Ok => Ok(()),
+            _ => Err(()),
+        }
+    }
+
+    // ==================== 新增诊断和验证功能 ====================
+    
+    /// 获取芯片状态
+    fn get_status(&mut self) -> Result<u8, ()> {
+        let cmd = [commands::GET_STATUS, 0x00];
+        let mut response = [0u8; 1];
+        match self.hal.read(&cmd, &mut response) {
+            Sx1268HalStatus::Ok => {
+                defmt::debug!("[SX1268] 状态寄存器: 0x{:02X}", response[0]);
+                Ok(response[0])
+            }
+            _ => Err(()),
+        }
+    }
+
+    /// 获取设备错误
+    fn get_device_errors(&mut self) -> Result<u16, ()> {
+        let cmd = [commands::GET_DEVICE_ERRORS, 0x00, 0x00];
+        let mut response = [0u8; 2];
+        match self.hal.read(&cmd, &mut response) {
+            Sx1268HalStatus::Ok => {
+                let errors = u16::from_be_bytes([response[0], response[1]]);
+                if errors != 0 {
+                    defmt::warn!("[SX1268] 设备错误: 0x{:04X}", errors);
+                }
+                Ok(errors)
+            }
+            _ => Err(()),
+        }
+    }
+
+    /// 清除设备错误
+    fn clear_device_errors(&mut self) -> Result<(), ()> {
+        let cmd = [commands::CLR_DEVICE_ERRORS, 0x00, 0x00];
+        match self.hal.write(&cmd, &[]) {
+            Sx1268HalStatus::Ok => Ok(()),
+            _ => Err(()),
+        }
+    }
+
+    /// SPI 通信测试 - 写入并读回寄存器
+    fn spi_test(&mut self) -> Result<(), ()> {
+        // 使用寄存器 0x0740 (LoRa sync word) 进行测试
+        let test_value = 0xA5u8;
+        
+        // 写入测试值
+        let addr = 0x0740u16.to_be_bytes();
+        let cmd_write = [commands::WRITE_REGISTER, addr[0], addr[1]];
+        match self.hal.write(&cmd_write, &[test_value]) {
+            Sx1268HalStatus::Ok => {}
+            _ => return Err(()),
+        }
+        
+        // 读回验证
+        let cmd_read = [commands::READ_REGISTER, addr[0], addr[1], 0x00];
+        let mut read_data = [0u8; 1];
+        match self.hal.read(&cmd_read, &mut read_data) {
+            Sx1268HalStatus::Ok => {}
+            _ => return Err(()),
+        }
+        
+        if read_data[0] == test_value {
+            defmt::debug!("[SX1268] SPI 测试: 写入 0x{:02X}, 读取 0x{:02X} ✓", test_value, read_data[0]);
+            Ok(())
+        } else {
+            defmt::error!("[SX1268] SPI 测试失败: 期望 0x{:02X}, 实际 0x{:02X}", test_value, read_data[0]);
+            Err(())
+        }
+    }
+
+    /// 检查 XOSC 启动状态
+    fn check_xosc_start(&mut self) -> Result<(), ()> {
+        let errors = self.get_device_errors()?;
+        const XOSC_START_ERR: u16 = 1 << 6;
+        
+        if (errors & XOSC_START_ERR) != 0 {
+            defmt::error!("[SX1268] XOSC 启动失败！");
+            Err(())
+        } else {
+            Ok(())
+        }
+    }
+
+    /// 读取寄存器（用于验证配置）
+    #[allow(dead_code)]
+    fn read_register(&mut self, addr: u16) -> Result<u8, ()> {
+        let addr_bytes = addr.to_be_bytes();
+        let cmd = [commands::READ_REGISTER, addr_bytes[0], addr_bytes[1], 0x00];
+        let mut response = [0u8; 1];
+        match self.hal.read(&cmd, &mut response) {
+            Sx1268HalStatus::Ok => Ok(response[0]),
+            _ => Err(()),
+        }
+    }
+
+    /// 写入寄存器（用于特殊配置）
+    #[allow(dead_code)]
+    fn write_register(&mut self, addr: u16, value: u8) -> Result<(), ()> {
+        let addr_bytes = addr.to_be_bytes();
+        let cmd = [commands::WRITE_REGISTER, addr_bytes[0], addr_bytes[1]];
+        match self.hal.write(&cmd, &[value]) {
             Sx1268HalStatus::Ok => Ok(()),
             _ => Err(()),
         }
