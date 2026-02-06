@@ -5,15 +5,15 @@ STM32F103C8T6 MCU 控制程序 - OLED 和 LoRa 控制器
 ## 项目概述
 
 这是一个使用 Rust 语言开发的 STM32F103C8T6 微控制器程序，能够同时控制：
-- 0.96寸 OLED 屏幕 (SSD1306，通过 I2C 接口)
+- 0.96寸 OLED 屏幕 (SSD1306，通过 I2C2 接口)
 - 亿佰特 E22-400M30S LoRa 无线模块 (SX1268 芯片，通过 SPI 接口)
 - USB CDC 虚拟串口 (用于 PC 与 LoRa 之间的控制)
 
 ## 硬件连接
 
-### OLED 显示屏 (I2C)
-- SCL -> PB6
-- SDA -> PB7
+### OLED 显示屏 (I2C2)
+- SCL -> PB10
+- SDA -> PB11
 - VCC -> 3.3V
 - GND -> GND
 
