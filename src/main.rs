@@ -1,7 +1,12 @@
 #![no_std]
 #![no_main]
 
-use panic_halt as _;
+// Blue-High 调试基础设施
+use defmt_rtt as _;
+use panic_probe as _;
+
+mod diagnostics;
+use diagnostics::BlueHighDiagnostics as Diag;
 
 use cortex_m_rt::entry;
 use stm32f1xx_hal::{
@@ -28,6 +33,8 @@ use usbd_serial::{SerialPort, USB_CLASS_CDC};
 
 #[entry]
 fn main() -> ! {
+    Diag::boot_sequence("STM32F103C8T6 初始化开始");
+    
     // Get access to the device specific peripherals from the peripheral access crate
     let dp = pac::Peripherals::take().unwrap();
 
@@ -44,6 +51,8 @@ fn main() -> ! {
         .sysclk(72.MHz())
         .pclk1(36.MHz())
         .freeze(&mut flash.acr);
+
+    Diag::clocks_configured(72, 36);
 
     // Acquire the GPIO and AFIO peripherals
     let mut gpiob = dp.GPIOB.split();
@@ -79,6 +88,8 @@ fn main() -> ! {
         .into_buffered_graphics_mode();
     
     display.init().unwrap();
+    
+    Diag::oled_status("SSD1306 128x64 初始化完成");
 
     // Create a text style
     let text_style = MonoTextStyleBuilder::new()
@@ -121,6 +132,8 @@ fn main() -> ! {
         .device_class(USB_CLASS_CDC)
         .build();
 
+    Diag::boot_sequence("USB CDC 虚拟串口已配置");
+
     // ========================================
     // E22-400M30S LoRa SPI Setup
     // ========================================
@@ -160,10 +173,13 @@ fn main() -> ! {
     nrst.set_high(); // Keep module active
     
     // Reset sequence for SX1268
+    Diag::e22_reset();
     nrst.set_low();
     delay.delay_ms(10_u32);
     nrst.set_high();
     delay.delay_ms(10_u32);
+
+    Diag::boot_sequence("E22-400M30S LoRa 模块就绪");
 
     // Display status
     display.clear(BinaryColor::Off).unwrap();
@@ -180,11 +196,16 @@ fn main() -> ! {
     
     delay.delay_ms(100_u32);
 
+    Diag::boot_sequence("系统初始化完成，进入主循环");
+
     // Main loop - USB to SPI bridge for LoRa control
     const BUFFER_SIZE: usize = 64;
     let mut usb_buf = [0u8; BUFFER_SIZE];
+    let mut loop_counter: u32 = 0;
     
     loop {
+        loop_counter = loop_counter.wrapping_add(1);
+        Diag::heartbeat(loop_counter);
         // Poll USB
         if !usb_dev.poll(&mut [&mut serial]) {
             continue;
@@ -193,15 +214,21 @@ fn main() -> ! {
         // USB -> LoRa SPI: Read from USB and send to LoRa via SPI
         match serial.read(&mut usb_buf) {
             Ok(count) if count > 0 => {
+                Diag::usb_bridge_rx(count);
+                
                 // Send data to LoRa via SPI (more efficient batch transfer)
+                Diag::spi_chip_select(true);
                 nss.set_low(); // Select chip
                 
                 // Transfer all bytes in one SPI transaction for efficiency
                 if let Ok(_) = spi.transfer(&mut usb_buf[0..count]) {
-                    // Data transferred successfully
+                    Diag::e22_spi_transfer(count);
+                } else {
+                    Diag::error_occurred("SPI 传输失败");
                 }
                 
                 nss.set_high(); // Deselect chip
+                Diag::spi_chip_select(false);
                 
                 // Update display
                 display.clear(BinaryColor::Off).unwrap();

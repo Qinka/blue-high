@@ -5,10 +5,15 @@ edition = "2021"
 authors = ["Qinka"]
 
 [dependencies]
-cortex-m = "0.7.7"
+cortex-m = { version = "0.7.7", features = ["critical-section-single-core"] }
 cortex-m-rt = "0.7.3"
-panic-halt = "0.2.0"
 embedded-hal = "0.2.7"
+portable-atomic = { version = "1.0", features = ["critical-section"] }
+
+# Logging and debugging infrastructure for probe-rs
+defmt = "0.3"
+defmt-rtt = "0.4"
+panic-probe = { version = "0.3", features = ["print-defmt"] }
 
 # STM32F1 HAL
 stm32f1xx-hal = { version = "0.10.0", features = ["stm32f103", "rt"] }
