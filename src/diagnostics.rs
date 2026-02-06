@@ -33,6 +33,45 @@ impl BlueHighDiagnostics {
     pub fn usb_bridge_rx(byte_count: usize) {
         defmt::println!("📥 [USB→LoRa] 接收 {} 字节", byte_count);
     }
+    
+    // USB 接收数据详细监控（显示十六进制和可打印 ASCII）
+    pub fn usb_data_received(data: &[u8]) {
+        let len = data.len();
+        defmt::println!("┌─ USB 数据详细内容 ({} 字节) ─", len);
+        
+        // 每行显示最多 16 字节
+        let mut offset = 0;
+        while offset < len {
+            let end = core::cmp::min(offset + 16, len);
+            let chunk = &data[offset..end];
+            
+            // 方法1：显示完整的十六进制行
+            if chunk.len() <= 8 {
+                defmt::println!("│ {:04x}: {:02x}", offset, chunk);
+            } else {
+                // 分成两部分显示
+                let (first, second) = chunk.split_at(8);
+                defmt::println!("│ {:04x}: {:02x} {:02x}", offset, first, second);
+            }
+            
+            // 方法2：显示可打印的 ASCII 内容
+            let mut ascii_repr = heapless::String::<32>::new();
+            for &byte in chunk {
+                if byte >= 0x20 && byte <= 0x7E {
+                    // 可打印 ASCII 字符
+                    let _ = ascii_repr.push(byte as char);
+                } else {
+                    let _ = ascii_repr.push('.');
+                }
+            }
+            if !ascii_repr.is_empty() {
+                defmt::println!("│       ASCII: {}", ascii_repr.as_str());
+            }
+            
+            offset += 16;
+        }
+        defmt::println!("└──────────────────────────────────");
+    }
 
     pub fn usb_bridge_tx(byte_count: usize) {
         defmt::println!("📤 [LoRa→USB] 发送 {} 字节", byte_count);
