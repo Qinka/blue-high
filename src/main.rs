@@ -45,22 +45,23 @@ fn main() -> ! {
 
     // Freeze the configuration of all the clocks in the system and store the frozen frequencies in
     // `clocks`. Configure 72MHz system clock with USB support
-    let clocks = rcc
-        .cfgr
-        .use_hse(8.MHz())
-        .sysclk(72.MHz())
-        .pclk1(36.MHz())
-        .freeze(&mut flash.acr);
+    use stm32f1xx_hal::rcc::Config;
+    let mut rcc = rcc.freeze(
+        Config::hse(8.MHz())
+            .sysclk(72.MHz())
+            .pclk1(36.MHz()),
+        &mut flash.acr,
+    );
 
     Diag::clocks_configured(72, 36);
 
     // Acquire the GPIO and AFIO peripherals
-    let mut gpiob = dp.GPIOB.split();
-    let mut gpioa = dp.GPIOA.split();
-    let mut afio = dp.AFIO.constrain();
+    let mut gpiob = dp.GPIOB.split(&mut rcc);
+    let mut gpioa = dp.GPIOA.split(&mut rcc);
+    let _afio = dp.AFIO.constrain(&mut rcc);
     
     // Create delay abstraction using TIM2
-    let mut delay = dp.TIM2.delay_us(&clocks);
+    let mut delay = dp.TIM2.delay_us(&mut rcc);
 
     // ========================================
     // OLED Display Setup (I2C2 on PB10/PB11)
@@ -69,14 +70,14 @@ fn main() -> ! {
     let i2c_scl = gpiob.pb10.into_alternate_open_drain(&mut gpiob.crh);
     let i2c_sda = gpiob.pb11.into_alternate_open_drain(&mut gpiob.crh);
 
-    let i2c = BlockingI2c::i2c2(
+    let i2c = BlockingI2c::new(
         dp.I2C2,
         (i2c_scl, i2c_sda),
         Mode::Fast {
             frequency: 400_000.Hz(),
             duty_cycle: DutyCycle::Ratio2to1,
         },
-        clocks,
+        &mut rcc,
         1000,
         10,
         1000,
@@ -126,9 +127,11 @@ fn main() -> ! {
     let mut serial = SerialPort::new(&usb_bus);
     
     let mut usb_dev = UsbDeviceBuilder::new(&usb_bus, UsbVidPid(0x16c0, 0x27dd))
-        .manufacturer("Qinka")
-        .product("Blue-High LoRa Bridge")
-        .serial_number("E22-001")
+        .strings(&[usb_device::device::StringDescriptors::default()
+            .manufacturer("Qinka")
+            .product("Blue-High LoRa Bridge")
+            .serial_number("E22-001")])
+        .unwrap()
         .device_class(USB_CLASS_CDC)
         .build();
 
@@ -156,16 +159,15 @@ fn main() -> ! {
     let mut nrst = gpioa.pa1.into_push_pull_output(&mut gpioa.crl);
 
     // Configure SPI1
-    let mut spi = Spi::spi1(
+    let mut spi = Spi::new(
         dp.SPI1,
-        (sck, miso, mosi),
-        &mut afio.mapr,
+        (Some(sck), Some(miso), Some(mosi)),
         SpiMode {
             polarity: Polarity::IdleLow,
             phase: Phase::CaptureOnFirstTransition,
         },
         1.MHz(),
-        clocks,
+        &mut rcc,
     );
 
     // Initialize E22-400M30S control pins
