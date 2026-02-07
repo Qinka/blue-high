@@ -30,9 +30,6 @@ usbd-serial = "0.2.2"
 # String formatting without heap allocation
 heapless = "0.9"
 
-# SX126x LoRa driver library
-sx126x = { git = "https://github.com/tweedegolf/sx126x-rs" }
-
 [profile.dev]
 opt-level = "s"
 
