@@ -56,6 +56,7 @@ dependencies = [
  "rtt-target",
  "ssd1306",
  "stm32f1xx-hal",
+ "sx126x",
  "usb-device",
  "usbd-serial",
 ]
@@ -583,6 +584,15 @@ dependencies = [
  "stm32f1",
  "vcell",
  "void",
+]
+
+[[package]]
+name = "sx126x"
+version = "0.3.0"
+source = "git+https://github.com/tweedegolf/sx126x-rs#3797571653db4476ced453c1cd280d501e0ad662"
+dependencies = [
+ "critical-section",
+ "embedded-hal 1.0.0",
 ]
 
 [[package]]
