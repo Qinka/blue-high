@@ -14,10 +14,9 @@ use diagnostics::BlueHighDiagnostics as Diag;
 mod lora_config;
 use lora_config::{LoRaConfig, CURRENT_CONFIG};
 
-mod sx1268_hal;
-mod sx1268_driver;
-use sx1268_hal::Sx1268Context;
-use sx1268_driver::Sx1268Driver;
+// 使用 sx126x-rs 库驱动 E22-400M30S
+mod sx126x_integration;
+use sx126x_integration::E22Driver;
 
 use cortex_m_rt::entry;
 use stm32f1xx_hal::{
