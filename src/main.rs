@@ -6,55 +6,51 @@
 use panic_probe as _;
 
 // 使用 defmt 进行日志输出
-use defmt::{error, info};
+use defmt::{self, info};
 
 mod diagnostics;
 use diagnostics::BlueHighDiagnostics as Diag;
 
-mod lora;
+mod lora_config;
+use lora_config::{LoRaConfig, CURRENT_CONFIG};
 
-use sx1268_rs::{
-    Sx1268, Sx1268Config,
-    config::{
-        CalibrationParams, FallbackMode, LoRaBandwidth, LoRaCodingRate, LoRaHeaderType,
-        LoRaModulationParams, LoRaPacketParams, LoRaSpreadingFactor, PaConfig, PacketType,
-        RampTime, RegulatorMode, SleepConfig, StandbyConfig, TcxoConfig, TcxoVoltage,
-    },
-    control::Control,
-};
+mod sx1268_hal;
+mod sx1268_driver;
+use sx1268_hal::Sx1268Context;
+use sx1268_driver::Sx1268Driver;
 
 use cortex_m_rt::entry;
 use stm32f1xx_hal::{
-    i2c::{BlockingI2c, DutyCycle, Mode},
     pac,
     prelude::*,
-    spi::{Mode as SpiMode, Phase, Polarity, Spi},
+    i2c::{BlockingI2c, DutyCycle, Mode},
+    spi::{Spi, Mode as SpiMode, Phase, Polarity},
     usb::{Peripheral, UsbBus},
 };
 
+use ssd1306::{
+    prelude::*,
+    I2CDisplayInterface, Ssd1306,
+};
 use embedded_graphics::{
-    mono_font::{MonoTextStyleBuilder, ascii::FONT_6X10},
+    mono_font::{ascii::FONT_6X10, MonoTextStyleBuilder},
     pixelcolor::BinaryColor,
     prelude::*,
     text::{Baseline, Text},
 };
-use ssd1306::{I2CDisplayInterface, Ssd1306, prelude::*};
 
 use usb_device::prelude::*;
 use usbd_serial::{SerialPort, USB_CLASS_CDC};
 
-use embedded_hal::spi::SpiDevice;
-
-use crate::lora::LoraControl;
-
 #[entry]
 fn main() -> ! {
+
     rtt_target::rtt_init_defmt!();
 
     // 立即输出第一条日志 - 这应该总是工作
-    info!("=== Blue-High 启动 ===");
-    info!("版本: 0.1.0");
-    info!("MCU: STM32F103C8T6");
+    defmt::info!("=== Blue-High 启动 ===");
+    defmt::info!("版本: 0.1.0");
+    defmt::info!("MCU: STM32F103C8T6");
 
     Diag::boot_sequence("STM32F103C8T6 初始化开始");
 
@@ -70,7 +66,9 @@ fn main() -> ! {
     // `clocks`. Configure 72MHz system clock with USB support
     use stm32f1xx_hal::rcc::Config;
     let mut rcc = rcc.freeze(
-        Config::hse(8.MHz()).sysclk(72.MHz()).pclk1(36.MHz()),
+        Config::hse(8.MHz())
+            .sysclk(72.MHz())
+            .pclk1(36.MHz()),
         &mut flash.acr,
     );
 
@@ -174,15 +172,15 @@ fn main() -> ! {
 
     // SX1268 Control pins
     let nss = gpioa.pa4.into_push_pull_output(&mut gpioa.crl);
-    let busy = gpiob.pb1.into_floating_input(&mut gpiob.crl);
-    let nrst = gpiob.pb0.into_push_pull_output(&mut gpiob.crl);
+    let busy = gpioa.pa3.into_floating_input(&mut gpioa.crl);
     let _dio1 = gpioa.pa2.into_floating_input(&mut gpioa.crl);
-
+    let nrst = gpioa.pa1.into_push_pull_output(&mut gpioa.crl);
+    
     // RF Switch control pins (TXEN/RXEN)
     // Note: E22 module may have internal RF switch control
     // If not exposed, these pins can be configured as dummy outputs
-    let txen = gpiob.pb12.into_push_pull_output(&mut gpiob.crh);
-    let rxen = gpiob.pb13.into_push_pull_output(&mut gpiob.crh);
+    let txen = gpiob.pb0.into_push_pull_output(&mut gpiob.crl);
+    let rxen = gpiob.pb1.into_push_pull_output(&mut gpiob.crl);
 
     // Configure SPI1
     let spi = Spi::new(
@@ -196,106 +194,51 @@ fn main() -> ! {
         &mut rcc,
     );
 
-    // lora
-    let mut lora = {
-        // Controls
-        let control = LoraControl {
-            spi,
-            nrst_pin: nrst,
-            busy_pin: busy,
-            cs_pin: nss,
-            tx_pin: txen,
-            rx_pin: rxen,
-        };
-        Sx1268::new(control)
-    };
-    // config
-    let config = Sx1268Config::default()
-        .with_package_lora()
-        .with_frequency_hz(433_000_000)
-        .expect("Invalid frequency")
-        .with_pa_config(PaConfig::best_22dbm())
-        .with_tx_power(20)
-        .with_ramp_time(RampTime::Ramp40Us)
-        .with_lora_modulation(
-            LoRaModulationParams::default()
-                .with_bandwidth(LoRaBandwidth::Bw500)
-                .with_spreading_factor(LoRaSpreadingFactor::Sf11)
-                .with_coding_rate(LoRaCodingRate::Cr4_5)
-                .with_low_data_rate_optimize(true),
-        )
-        .with_lora_packet(
-            LoRaPacketParams::default()
-                .with_preamble_length(8)
-                .with_header_type(LoRaHeaderType::Explicit)
-                .with_payload_length(255)
-                .with_crc_on(true)
-                .with_invert_iq(false),
-        )
-        .with_regulator_mode(RegulatorMode::DcDcLdo)
-        .with_lora_sync_word(0x1424)
-        .with_tx_base_address(0x00)
-        .with_rx_base_address(0x00)
-        // .with_dio2_as_rf_switch(true)
-        .with_fallback_mode(FallbackMode::StbyRc)
-        .with_tcxo_config(TcxoVoltage::Ctrl3v3, 320)
-        .with_calibration(CalibrationParams::ALL);
+    // Create SX1268 HAL context
+    let sx1268_ctx = Sx1268Context::new(spi, nss, nrst, busy, txen, rxen);
+    
+    // Create SX1268 driver
+    let mut sx1268 = Sx1268Driver::new(sx1268_ctx);
 
-    lora.init(config.clone())
-        .expect("SX1268 initialization failed");
     Diag::boot_sequence("E22-400M30S SX1268 驱动创建完成");
 
-    // 打印配置信息到调试日志
-    info!("╔══════════════════════════════════╗");
-    info!("║      E22-400M30S LoRa 配置       ║");
-    info!("╠══════════════════════════════════╣");
-    info!("║ 频率: {}Hz", config.get_frequency_hz());
-    info!("║ 功率: {} dBm", config.get_power_dbm());
-    info!("║ 带宽: {} kHz", config.get_bandwidth_khz());
-    info!("║ 扩频因子: SF{}", config.get_sf());
-    info!(
-        "║ 编码率: CR{}/{}",
-        config.get_cr_ratio().0,
-        config.get_cr_ratio().1
-    );
-    info!("║ 前导码: {} 符号", config.get_preamble_length());
-    info!(
-        "║ CRC: {}",
-        if config.get_crc_enabled() {
-            "启用"
-        } else {
-            "禁用"
-        }
-    );
-    info!(
-        "║ 头部: {}",
-        if config.get_header_type() == LoRaHeaderType::Explicit {
-            "显式"
-        } else {
-            "隐式"
-        }
-    );
-    info!(
-        "║ 同步字: 0x{:02X} ({})",
-        config.get_sync_word(),
-        if config.get_sync_word() == 0x14 {
-            "公网"
-        } else {
-            "私网"
-        }
-    );
-    info!(
-        "║ PA 配置: duty={:02X} hp={:02X}",
-        config.get_pa_duty_cycle(),
-        config.get_pa_hp_max()
-    );
-    info!("╚══════════════════════════════════╝");
+    // ========================================
+    // LoRa 配置加载和初始化
+    // ========================================
+    // 用户可以在 src/lora_config.rs 中修改 CURRENT_CONFIG 来改变 LoRa 参数
+    let lora_cfg = CURRENT_CONFIG;
 
-    lora.send_lora(&[1, 2, 3, 4, 5], 0)
-        .expect("LoRa 发送测试失败");
+    // 打印配置信息到调试日志
+    defmt::info!("╔══════════════════════════════════╗");
+    defmt::info!("║      E22-400M30S LoRa 配置       ║");
+    defmt::info!("╠══════════════════════════════════╣");
+    defmt::info!("║ 频率: {} MHz ({}Hz)", lora_cfg.get_frequency_mhz(), lora_cfg.get_frequency_hz());
+    defmt::info!("║ 功率: {} dBm (2级输出)", lora_cfg.get_power_dbm());
+    defmt::info!("║       {} dBm (1级芯片)", lora_cfg.get_chip_power_dbm());
+    defmt::info!("║ 带宽: {} kHz", lora_cfg.get_bandwidth_khz());
+    defmt::info!("║ 扩频因子: SF{}", lora_cfg.get_sf());
+    defmt::info!("║ 编码率: CR4/{}", lora_cfg.get_cr_ratio());
+    defmt::info!("║ 前导码: {} 符号", lora_cfg.preamble_length);
+    defmt::info!("║ CRC: {}", if lora_cfg.crc_enabled { "启用" } else { "禁用" });
+    defmt::info!("║ 头部: {}", if lora_cfg.explicit_header { "显式" } else { "隐式" });
+    defmt::info!("║ 同步字: 0x{:02X} ({})", lora_cfg.sync_word,
+        if lora_cfg.sync_word == 0x12 { "公网" } else { "私网" });
+    defmt::info!("║ PA 配置: duty={:02X} hp={:02X}",
+        lora_cfg.pa_config.pa_duty_cycle, lora_cfg.pa_config.hp_max);
+    defmt::info!("╚══════════════════════════════════╝");
 
     // 初始化 SX1268 芯片
     let mut delay_fn = |ms: u32| delay.delay_ms(ms);
+    match sx1268.init(&lora_cfg, &mut delay_fn) {
+        Ok(_) => {
+            defmt::info!("[SX1268] ✅ 初始化成功");
+            Diag::boot_sequence("SX1268 LoRa 芯片初始化完成");
+        }
+        Err(_) => {
+            defmt::error!("[SX1268] ❌ 初始化失败");
+            Diag::error_occurred("SX1268 初始化失败");
+        }
+    }
 
     // Display status with configuration
     display.clear(BinaryColor::Off).unwrap();
@@ -310,57 +253,26 @@ fn main() -> ! {
     let mut bw_str = heapless::String::<16>::new();
     let mut sf_cr_str = heapless::String::<20>::new();
 
-    write!(&mut freq_str, "{}MHz", config.get_frequency_mhz()).ok();
-    write!(&mut power_str, "{}dBm", config.get_power_dbm()).ok();
-    write!(&mut bw_str, "BW{}k", config.get_bandwidth_khz()).ok();
-    write!(
-        &mut sf_cr_str,
-        "SF{} CR{}/{}",
-        config.get_sf(),
-        config.get_cr_ratio().0,
-        config.get_cr_ratio().1
-    )
-    .ok();
+    write!(&mut freq_str, "{}MHz", lora_cfg.get_frequency_mhz()).ok();
+    write!(&mut power_str, "{}dBm", lora_cfg.get_power_dbm()).ok();
+    write!(&mut bw_str, "BW{}k", lora_cfg.get_bandwidth_khz()).ok();
+    write!(&mut sf_cr_str, "SF{} CR4/{}", lora_cfg.get_sf(), lora_cfg.get_cr_ratio()).ok();
 
-    Text::with_baseline(
-        freq_str.as_str(),
-        Point::new(0, 12),
-        text_style,
-        Baseline::Top,
-    )
-    .draw(&mut display)
-    .unwrap();
-    Text::with_baseline(
-        power_str.as_str(),
-        Point::new(60, 12),
-        text_style,
-        Baseline::Top,
-    )
-    .draw(&mut display)
-    .unwrap();
-    Text::with_baseline(
-        bw_str.as_str(),
-        Point::new(0, 24),
-        text_style,
-        Baseline::Top,
-    )
-    .draw(&mut display)
-    .unwrap();
-    Text::with_baseline(
-        sf_cr_str.as_str(),
-        Point::new(0, 36),
-        text_style,
-        Baseline::Top,
-    )
-    .draw(&mut display)
-    .unwrap();
+    Text::with_baseline(freq_str.as_str(), Point::new(0, 12), text_style, Baseline::Top)
+        .draw(&mut display)
+        .unwrap();
+    Text::with_baseline(power_str.as_str(), Point::new(60, 12), text_style, Baseline::Top)
+        .draw(&mut display)
+        .unwrap();
+    Text::with_baseline(bw_str.as_str(), Point::new(0, 24), text_style, Baseline::Top)
+        .draw(&mut display)
+        .unwrap();
+    Text::with_baseline(sf_cr_str.as_str(), Point::new(0, 36), text_style, Baseline::Top)
+        .draw(&mut display)
+        .unwrap();
 
     // 显示网络类型
-    let net_type = if config.get_sync_word() == 0x14 {
-        "Public"
-    } else {
-        "Private"
-    };
+    let net_type = if lora_cfg.sync_word == 0x12 { "Public" } else { "Private" };
     Text::with_baseline(net_type, Point::new(0, 48), text_style, Baseline::Top)
         .draw(&mut display)
         .unwrap();
@@ -375,13 +287,13 @@ fn main() -> ! {
     const BUFFER_SIZE: usize = 64;
     let mut usb_buf = [0u8; BUFFER_SIZE];
     let mut loop_counter: u32 = 0;
-
+    
     // Create delay closure once outside the loop
     let mut delay_fn = |ms: u32| delay.delay_ms(ms);
 
     loop {
         loop_counter = loop_counter.wrapping_add(1);
-
+        
         // Poll USB
         if !usb_dev.poll(&mut [&mut serial]) {
             continue;
@@ -396,63 +308,43 @@ fn main() -> ! {
                 Diag::usb_data_received(&usb_buf[0..count]);
 
                 // 使用 SX1268 驱动发送 LoRa 数据
-                info!("[主循环] 准备通过 LoRa 发送 {} 字节", count);
-
-                match lora.send_lora(&usb_buf[0..count], 0) {
+                defmt::info!("[主循环] 准备通过 LoRa 发送 {} 字节", count);
+                
+                match sx1268.transmit(&usb_buf[0..count], &mut delay_fn) {
                     Ok(_) => {
-                        info!("[主循环] ✅ LoRa 发送成功");
-
+                        defmt::info!("[主循环] ✅ LoRa 发送成功");
+                        
                         // Update display
                         display.clear(BinaryColor::Off).unwrap();
-                        Text::with_baseline(
-                            "USB->LoRa",
-                            Point::new(0, 0),
-                            text_style,
-                            Baseline::Top,
-                        )
-                        .draw(&mut display)
-                        .unwrap();
-                        Text::with_baseline(
-                            "TX Success",
-                            Point::new(0, 12),
-                            text_style,
-                            Baseline::Top,
-                        )
-                        .draw(&mut display)
-                        .unwrap();
-
+                        Text::with_baseline("USB->LoRa", Point::new(0, 0), text_style, Baseline::Top)
+                            .draw(&mut display)
+                            .unwrap();
+                        Text::with_baseline("TX Success", Point::new(0, 12), text_style, Baseline::Top)
+                            .draw(&mut display)
+                            .unwrap();
+                        
                         // 显示发送的字节数
                         use core::fmt::Write;
                         let mut bytes_str = heapless::String::<20>::new();
                         write!(&mut bytes_str, "{} bytes", count).ok();
-                        Text::with_baseline(
-                            bytes_str.as_str(),
-                            Point::new(0, 24),
-                            text_style,
-                            Baseline::Top,
-                        )
-                        .draw(&mut display)
-                        .unwrap();
-
+                        Text::with_baseline(bytes_str.as_str(), Point::new(0, 24), text_style, Baseline::Top)
+                            .draw(&mut display)
+                            .unwrap();
+                        
                         display.flush().unwrap();
                     }
                     Err(_) => {
-                        error!("[主循环] ❌ LoRa 发送失败");
+                        defmt::error!("[主循环] ❌ LoRa 发送失败");
                         Diag::error_occurred("LoRa 发送失败");
-
+                        
                         // Update display
                         display.clear(BinaryColor::Off).unwrap();
                         Text::with_baseline("LoRa TX", Point::new(0, 0), text_style, Baseline::Top)
                             .draw(&mut display)
                             .unwrap();
-                        Text::with_baseline(
-                            "Failed!",
-                            Point::new(0, 12),
-                            text_style,
-                            Baseline::Top,
-                        )
-                        .draw(&mut display)
-                        .unwrap();
+                        Text::with_baseline("Failed!", Point::new(0, 12), text_style, Baseline::Top)
+                            .draw(&mut display)
+                            .unwrap();
                         display.flush().unwrap();
                     }
                 }
