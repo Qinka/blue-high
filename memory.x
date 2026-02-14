@@ -7,13 +7,3 @@ MEMORY
   /* RAM: 20KB */
   RAM : ORIGIN = 0x20000000, LENGTH = 20K
 }
-
-/* defmt logging support */
-SECTIONS
-{
-  /* Place defmt data at the end of FLASH after all code */
-  .defmt (NOLOAD) : ALIGN(4)
-  {
-    *(.defmt .defmt.*);
-  } > RAM
-}
