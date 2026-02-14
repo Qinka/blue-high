@@ -135,9 +135,6 @@ fn main() -> ! {
 
     // Control pins
     let mut nss = gpioa.pa4.into_push_pull_output(&mut gpioa.crl);
-    // Note: BUSY and DIO1 pins are available for future SX1268 driver integration
-    // BUSY should be checked before SPI transactions
-    // DIO1 can be used for interrupt-driven event handling
     let _busy = gpioa.pa3.into_floating_input(&mut gpioa.crl);
     let _dio1 = gpioa.pa2.into_floating_input(&mut gpioa.crl);
     let mut nrst = gpioa.pa1.into_push_pull_output(&mut gpioa.crl);
@@ -183,6 +180,7 @@ fn main() -> ! {
     // Main loop - USB to SPI bridge for LoRa control
     const BUFFER_SIZE: usize = 64;
     let mut usb_buf = [0u8; BUFFER_SIZE];
+    let mut _spi_buf = [0u8; BUFFER_SIZE];
     
     loop {
         // Poll USB
@@ -193,12 +191,13 @@ fn main() -> ! {
         // USB -> LoRa SPI: Read from USB and send to LoRa via SPI
         match serial.read(&mut usb_buf) {
             Ok(count) if count > 0 => {
-                // Send data to LoRa via SPI (more efficient batch transfer)
+                // Send data to LoRa via SPI
                 nss.set_low(); // Select chip
                 
-                // Transfer all bytes in one SPI transaction for efficiency
-                if let Ok(_) = spi.transfer(&mut usb_buf[0..count]) {
-                    // Data transferred successfully
+                for i in 0..count {
+                    if let Ok(_) = spi.transfer(&mut [usb_buf[i]]) {
+                        // Data transferred
+                    }
                 }
                 
                 nss.set_high(); // Deselect chip
