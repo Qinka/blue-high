@@ -79,9 +79,9 @@ STM32F103C8T6 MCU 控制程序 - OLED 和 LoRa 控制器
    - PC 通过 USB 串口控制 LoRa 模块
    - 实时显示传输状态
 
-5. **实时调试日志 (defmt via RTT)**
-   - 集成 defmt 日志系统，通过 RTT (Real-Time Transfer) 实时输出
-   - 纯软件实现，不依赖硬件引脚
+5. **实时调试日志 (defmt via SWO)**
+   - 集成 defmt 日志系统，通过 SWO (Serial Wire Output) 实时输出
+   - 使用 ITM (Instrumentation Trace Macrocell) 进行高效日志传输
    - 中文日志消息，易于理解调试信息
    - 表情符号标记不同类型的事件
    - 监控系统启动、时钟配置、外设初始化
@@ -127,10 +127,10 @@ cargo check
 ### 使用 probe-rs (推荐)
 
 ```bash
-# 烧录并查看 defmt 调试输出（通过 RTT）
+# 烧录并查看 defmt 调试输出（通过 SWO）
 cargo run --release
 
-# 程序会在 probe-rs 中显示实时日志（通过 RTT 输出），包括：
+# 程序会在 probe-rs 中显示实时日志（通过 SWO/ITM 输出），包括：
 # 🚀 启动序列信息
 # ⏰ 时钟配置 (72MHz 系统时钟, 36MHz APB1)
 # 📺 OLED 初始化状态
@@ -141,14 +141,14 @@ cargo run --release
 ```
 
 **注意**: 
-- RTT (Real-Time Transfer) 是纯软件实现
-- 所有 SWD 调试器都支持 RTT
-- probe-rs 默认支持 RTT 输出
-- 更稳定可靠
+- SWO (Serial Wire Output) 使用 ITM 通道进行日志输出
+- 比 RTT 更高效，不占用额外的 RAM
+- 需要 SWD 调试器支持 SWO 功能（大多数 ST-Link V2/V3 都支持）
+- probe-rs 会自动检测并使用 SWO 输出
 
-### 查看调试日志 (RTT)
+### 查看调试日志 (SWO/ITM)
 
-本项目集成了 `defmt` 日志系统，通过 RTT (Real-Time Transfer) 可以实时查看设备运行状态：
+本项目集成了 `defmt` 日志系统，通过 SWO (Serial Wire Output) 可以实时查看设备运行状态：
 
 - **系统启动和初始化过程**
 - **时钟配置信息**
