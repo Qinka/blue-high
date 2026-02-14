@@ -79,14 +79,12 @@ STM32F103C8T6 MCU 控制程序 - OLED 和 LoRa 控制器
    - PC 通过 USB 串口控制 LoRa 模块
    - 实时显示传输状态
 
-5. **实时调试日志 (defmt via SWO)**
-   - 集成 defmt 日志系统，通过 SWO (Serial Wire Output) 实时输出
-   - 使用 ITM (Instrumentation Trace Macrocell) 进行高效日志传输
+5. **实时调试日志 (defmt)**
+   - 集成 defmt 日志系统，通过 probe-rs 实时输出
    - 中文日志消息，易于理解调试信息
    - 表情符号标记不同类型的事件
    - 监控系统启动、时钟配置、外设初始化
    - 跟踪 USB-LoRa 数据桥接活动
-   - USB 输入数据详细监控（十六进制 + ASCII）
    - 主循环心跳计数器
    - SPI 传输详细日志
 
@@ -127,54 +125,30 @@ cargo check
 ### 使用 probe-rs (推荐)
 
 ```bash
-# 烧录并查看 defmt 调试输出（通过 SWO）
+# 烧录并查看 defmt 调试输出
 cargo run --release
 
-# 程序会在 probe-rs 中显示实时日志（通过 SWO/ITM 输出），包括：
+# 程序会在 probe-rs 中显示实时日志，包括：
 # 🚀 启动序列信息
 # ⏰ 时钟配置 (72MHz 系统时钟, 36MHz APB1)
 # 📺 OLED 初始化状态
 # 📡 E22-400M30S LoRa 模块状态
 # 📥📤 USB 与 LoRa SPI 数据传输活动
-# 📋 USB 输入数据详细监控（十六进制 + ASCII）
 # 💓 主循环心跳监控
 ```
 
-**注意**: 
-- SWO (Serial Wire Output) 使用 ITM 通道进行日志输出
-- 比 RTT 更高效，不占用额外的 RAM
-- 需要 SWD 调试器支持 SWO 功能（大多数 ST-Link V2/V3 都支持）
-- probe-rs 会自动检测并使用 SWO 输出
+### 查看调试日志
 
-### 查看调试日志 (SWO/ITM)
+本项目集成了 `defmt` 日志系统，通过 probe-rs 可以实时查看设备运行状态：
 
-本项目集成了 `defmt` 日志系统，通过 SWO (Serial Wire Output) 可以实时查看设备运行状态：
-
-- **系统启动和初始化过程**
-- **时钟配置信息**
-- **外设就绪状态** (OLED, USB, E22 LoRa)
-- **USB 到 LoRa 的数据桥接活动**
-- **USB 输入数据详细监控** - 十六进制和 ASCII 格式显示
-- **SPI 传输详情**
-- **LoRa 配置参数** - 频率、功率、带宽、SF、CR 等
-- **错误诊断信息**
+- 系统启动和初始化过程
+- 时钟配置信息
+- 外设就绪状态 (OLED, USB, E22 LoRa)
+- USB 到 LoRa 的数据桥接活动
+- SPI 传输详情
+- 错误诊断信息
 
 所有日志消息都使用中文和表情符号，便于快速识别不同类型的事件。
-
-**USB 数据监控示例**：
-```
-📥 [USB→LoRa] 接收 12 字节
-┌─ USB 数据详细内容 (12 字节) ─
-│ 0000: [48, 65, 6c, 6c, 6f, 20, 4c, 6f] [52, 61, 21, 0a]
-│       ASCII: Hello LoRa!.
-└──────────────────────────────────
-```
-
-**SWO 优势**：
-- 不占用额外的 RAM 缓冲区（与 RTT 相比）
-- 更高的数据吞吐量
-- 实时性更好，延迟更低
-- 标准 ARM Cortex-M 功能，硬件支持
 
 ### 使用 OpenOCD
 
