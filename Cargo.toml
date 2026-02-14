@@ -9,7 +9,6 @@ cortex-m = "0.7.7"
 cortex-m-rt = "0.7.3"
 panic-halt = "0.2.0"
 embedded-hal = "0.2.7"
-nb = "1.0"
 
 # STM32F1 HAL
 stm32f1xx-hal = { version = "0.10.0", features = ["stm32f103", "rt"] }
@@ -17,10 +16,6 @@ stm32f1xx-hal = { version = "0.10.0", features = ["stm32f103", "rt"] }
 # OLED display driver (SSD1306 via I2C)
 ssd1306 = "0.8.4"
 embedded-graphics = "0.8.1"
-
-# USB CDC support
-usb-device = "0.2.9"
-usbd-serial = "0.1.1"
 
 # LoRa driver placeholder (E22-400M30S uses SX1268 via SPI)
 # Full driver integration can be added based on specific requirements

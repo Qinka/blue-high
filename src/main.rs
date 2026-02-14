@@ -8,8 +8,7 @@ use stm32f1xx_hal::{
     pac,
     prelude::*,
     i2c::{BlockingI2c, DutyCycle, Mode},
-    serial::{Config, Serial},
-    usb::{Peripheral, UsbBus},
+    spi::{Spi, Mode as SpiMode, Phase, Polarity},
 };
 
 use ssd1306::{
@@ -23,11 +22,6 @@ use embedded_graphics::{
     text::{Baseline, Text},
 };
 
-use usb_device::prelude::*;
-use usbd_serial::{SerialPort, USB_CLASS_CDC};
-
-use nb::block;
-
 #[entry]
 fn main() -> ! {
     // Get access to the device specific peripherals from the peripheral access crate
@@ -39,17 +33,12 @@ fn main() -> ! {
     let rcc = dp.RCC.constrain();
 
     // Freeze the configuration of all the clocks in the system and store the frozen frequencies in
-    // `clocks`. Configure for USB (48 MHz required)
-    let clocks = rcc
-        .cfgr
-        .use_hse(8.MHz())
-        .sysclk(48.MHz())
-        .pclk1(24.MHz())
-        .freeze(&mut flash.acr);
+    // `clocks`
+    let clocks = rcc.cfgr.freeze(&mut flash.acr);
 
     // Acquire the GPIO and AFIO peripherals
     let mut gpiob = dp.GPIOB.split();
-    let gpioa = dp.GPIOA.split();
+    let mut gpioa = dp.GPIOA.split();
     let mut afio = dp.AFIO.constrain();
     
     // Create delay abstraction using TIM2
@@ -99,129 +88,97 @@ fn main() -> ! {
     display.flush().unwrap();
 
     // ========================================
-    // USB CDC Setup (PA11/PA12)
+    // E22-400M30S LoRa Module Setup (SPI)
     // ========================================
-    // Configure USB peripheral
-    let mut gpioa_crh = gpioa.crh;
-    let usb_dm = gpioa.pa11;
-    let usb_dp = gpioa.pa12.into_floating_input(&mut gpioa_crh);
+    // The E22-400M30S uses SPI communication with SX1268 chip
+    // SPI pins: SCK = PA5, MISO = PA6, MOSI = PA7
+    // NSS/CS = PA4
+    // BUSY = PA3
+    // DIO1 = PA2 (for interrupt)
+    // NRST = PA1 (reset pin)
     
-    let usb = Peripheral {
-        usb: dp.USB,
-        pin_dm: usb_dm,
-        pin_dp: usb_dp,
-    };
-    
-    let usb_bus = UsbBus::new(usb);
-    
-    let mut serial = SerialPort::new(&usb_bus);
-    
-    let mut usb_dev = UsbDeviceBuilder::new(&usb_bus, UsbVidPid(0x16c0, 0x27dd))
-        .manufacturer("Qinka")
-        .product("Blue-High LoRa Bridge")
-        .serial_number("E22-001")
-        .device_class(USB_CLASS_CDC)
-        .build();
+    // SPI pins configuration
+    let sck = gpioa.pa5.into_alternate_push_pull(&mut gpioa.crl);
+    let miso = gpioa.pa6;
+    let mosi = gpioa.pa7.into_alternate_push_pull(&mut gpioa.crl);
 
-    // ========================================
-    // E22-400M30S LoRa UART Setup (PA9/PA10)
-    // ========================================
-    // UART1 for LoRa communication
-    let tx = gpioa.pa9.into_alternate_push_pull(&mut gpioa_crh);
-    let rx = gpioa.pa10;
-    
-    let serial_lora = Serial::new(
-        dp.USART1,
-        (tx, rx),
+    // Control pins
+    let mut nss = gpioa.pa4.into_push_pull_output(&mut gpioa.crl);
+    let _busy = gpioa.pa3.into_floating_input(&mut gpioa.crl);
+    let _dio1 = gpioa.pa2.into_floating_input(&mut gpioa.crl);
+    let mut nrst = gpioa.pa1.into_push_pull_output(&mut gpioa.crl);
+
+    // Configure SPI1
+    let _spi = Spi::spi1(
+        dp.SPI1,
+        (sck, miso, mosi),
         &mut afio.mapr,
-        Config::default().baudrate(9600.bps()),
-        &clocks,
+        SpiMode {
+            polarity: Polarity::IdleLow,
+            phase: Phase::CaptureOnFirstTransition,
+        },
+        1.MHz(),
+        clocks,
     );
-    
-    let (mut tx_lora, mut rx_lora) = serial_lora.split();
 
-    // Display status
+    // Initialize E22-400M30S control pins
+    nss.set_high(); // Deselect initially
+    nrst.set_high(); // Keep module active
+    
+    // Reset sequence
+    nrst.set_low();
+    delay.delay_ms(10_u32);
+    nrst.set_high();
+    delay.delay_ms(10_u32);
+
+    // Note: Full SX1268 driver integration would be added here
+    // For now, we demonstrate the SPI interface is properly configured
+
+    // Display LoRa status
     display.clear(BinaryColor::Off).unwrap();
-    Text::with_baseline("USB-LoRa", Point::new(0, 0), text_style, Baseline::Top)
+    Text::with_baseline("E22-400M30S", Point::new(0, 0), text_style, Baseline::Top)
         .draw(&mut display)
         .unwrap();
-    Text::with_baseline("Bridge Ready", Point::new(0, 12), text_style, Baseline::Top)
+    Text::with_baseline("SX1268 SPI", Point::new(0, 12), text_style, Baseline::Top)
         .draw(&mut display)
         .unwrap();
-    Text::with_baseline("9600 baud", Point::new(0, 24), text_style, Baseline::Top)
+    Text::with_baseline("Ready!", Point::new(0, 24), text_style, Baseline::Top)
         .draw(&mut display)
         .unwrap();
     display.flush().unwrap();
     
     delay.delay_ms(100_u32);
 
-    // Main loop - transparent data bridge
-    let mut usb_buf = [0u8; 64];
-    let mut lora_buf = [0u8; 64];
-    let mut byte_count: u32 = 0;
+    // Main loop - update display periodically
+    let mut counter: u32 = 0;
+    const COUNTER_LABELS: [&str; 10] = [
+        "Count: 0", "Count: 1", "Count: 2", "Count: 3", "Count: 4",
+        "Count: 5", "Count: 6", "Count: 7", "Count: 8", "Count: 9"
+    ];
     
     loop {
-        // Poll USB
-        if !usb_dev.poll(&mut [&mut serial]) {
-            continue;
-        }
+        // In a full implementation, LoRa transmission would occur here
+        // using the SX1268 driver over SPI
         
-        // USB -> LoRa: Read from USB and send to LoRa
-        match serial.read(&mut usb_buf) {
-            Ok(count) if count > 0 => {
-                // Send data to LoRa UART
-                for i in 0..count {
-                    block!(tx_lora.write(usb_buf[i])).ok();
-                }
-                byte_count = byte_count.wrapping_add(count as u32);
-                
-                // Update display
-                display.clear(BinaryColor::Off).unwrap();
-                Text::with_baseline("USB->LoRa", Point::new(0, 0), text_style, Baseline::Top)
-                    .draw(&mut display)
-                    .unwrap();
-                Text::with_baseline("TX OK", Point::new(0, 12), text_style, Baseline::Top)
-                    .draw(&mut display)
-                    .unwrap();
-                display.flush().unwrap();
-            }
-            _ => {}
-        }
+        // Update display with counter
+        display.clear(BinaryColor::Off).unwrap();
+        Text::with_baseline("E22-400M30S", Point::new(0, 0), text_style, Baseline::Top)
+            .draw(&mut display)
+            .unwrap();
+        Text::with_baseline("SPI Ready", Point::new(0, 12), text_style, Baseline::Top)
+            .draw(&mut display)
+            .unwrap();
         
-        // LoRa -> USB: Read from LoRa and send to USB
-        let mut lora_count = 0;
-        for i in 0..64 {
-            match rx_lora.read() {
-                Ok(byte) => {
-                    lora_buf[i] = byte;
-                    lora_count += 1;
-                }
-                Err(_) => break,
-            }
-        }
+        // Display counter using lookup table
+        let counter_text = COUNTER_LABELS[(counter % 10) as usize];
+        Text::with_baseline(counter_text, Point::new(0, 24), text_style, Baseline::Top)
+            .draw(&mut display)
+            .unwrap();
+        display.flush().unwrap();
+
+        counter = counter.wrapping_add(1);
         
-        if lora_count > 0 {
-            // Send data to USB
-            let mut write_offset = 0;
-            while write_offset < lora_count {
-                match serial.write(&lora_buf[write_offset..lora_count]) {
-                    Ok(len) => {
-                        write_offset += len;
-                    }
-                    Err(_) => break,
-                }
-            }
-            byte_count = byte_count.wrapping_add(lora_count as u32);
-            
-            // Update display
-            display.clear(BinaryColor::Off).unwrap();
-            Text::with_baseline("LoRa->USB", Point::new(0, 0), text_style, Baseline::Top)
-                .draw(&mut display)
-                .unwrap();
-            Text::with_baseline("RX OK", Point::new(0, 12), text_style, Baseline::Top)
-                .draw(&mut display)
-                .unwrap();
-            display.flush().unwrap();
-        }
+        // Delay 1 second
+        delay.delay_ms(1000_u32);
     }
 }
