@@ -274,9 +274,6 @@ fn main() -> ! {
             Ok(count) if count > 0 => {
                 Diag::usb_bridge_rx(count);
                 
-                // 显示接收到的 USB 数据详细内容（十六进制和 ASCII）
-                Diag::usb_data_received(&usb_buf[0..count]);
-                
                 // Send data to LoRa via SPI (more efficient batch transfer)
                 Diag::spi_chip_select(true);
                 nss.set_low(); // Select chip
