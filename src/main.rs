@@ -8,7 +8,7 @@ use stm32f1xx_hal::{
     pac,
     prelude::*,
     i2c::{BlockingI2c, DutyCycle, Mode},
-    serial::{Config, Serial},
+    spi::{Spi, Mode as SpiMode, Phase, Polarity},
 };
 
 use ssd1306::{
@@ -22,7 +22,9 @@ use embedded_graphics::{
     text::{Baseline, Text},
 };
 
-use nb::block;
+use sx127x_lora::{
+    LoRa,
+};
 
 #[entry]
 fn main() -> ! {
@@ -43,8 +45,9 @@ fn main() -> ! {
     let mut gpioa = dp.GPIOA.split();
     let mut afio = dp.AFIO.constrain();
     
-    // Create delay abstraction using TIM2
+    // Create delay abstractions using TIM2 and TIM3
     let mut delay = dp.TIM2.delay_us(&clocks);
+    let lora_delay = dp.TIM3.delay_us(&clocks);
 
     // ========================================
     // OLED Display Setup (I2C on PB6/PB7)
@@ -90,55 +93,48 @@ fn main() -> ! {
     display.flush().unwrap();
 
     // ========================================
-    // E22-400M30S LoRa Module Setup (UART)
+    // LoRa Module Setup (SPI on PA5/PA6/PA7)
     // ========================================
-    // The E22-400M30S uses UART communication
-    // UART1: TX = PA9, RX = PA10
-    // M0 and M1 pins for mode control (can use PA2, PA3)
-    // AUX pin for status monitoring (optional, can use PA4)
-    
-    // Configure mode control pins
-    // M0 = PA2, M1 = PA3
-    // Mode 0 (M0=0, M1=0): Normal/Transmission mode
-    // Mode 1 (M0=1, M1=0): Wake-up mode  
-    // Mode 2 (M0=0, M1=1): Power-saving mode
-    // Mode 3 (M0=1, M1=1): Sleep/Configuration mode
-    let mut m0 = gpioa.pa2.into_push_pull_output(&mut gpioa.crl);
-    let mut m1 = gpioa.pa3.into_push_pull_output(&mut gpioa.crl);
-    
-    // Set to Normal mode (M0=0, M1=0) for transmission
-    m0.set_low();
-    m1.set_low();
-    
-    // Configure UART1 (PA9=TX, PA10=RX)
-    let tx = gpioa.pa9.into_alternate_push_pull(&mut gpioa.crh);
-    let rx = gpioa.pa10;
-    
-    // Initialize UART with 9600 baud (default for E22 modules)
-    let serial = Serial::new(
-        dp.USART1,
-        (tx, rx),
+    // SPI pins: SCK = PA5, MISO = PA6, MOSI = PA7
+    let sck = gpioa.pa5.into_alternate_push_pull(&mut gpioa.crl);
+    let miso = gpioa.pa6;
+    let mosi = gpioa.pa7.into_alternate_push_pull(&mut gpioa.crl);
+
+    // CS (Chip Select) = PA4
+    let mut cs = gpioa.pa4.into_push_pull_output(&mut gpioa.crl);
+    cs.set_high();
+
+    // Reset pin = PA3
+    let reset = gpioa.pa3.into_push_pull_output(&mut gpioa.crl);
+
+    let spi = Spi::spi1(
+        dp.SPI1,
+        (sck, miso, mosi),
         &mut afio.mapr,
-        Config::default().baudrate(9600.bps()),
-        &clocks,
+        SpiMode {
+            polarity: Polarity::IdleLow,
+            phase: Phase::CaptureOnFirstTransition,
+        },
+        1.MHz(),
+        clocks,
     );
-    
-    let (mut tx_uart, mut rx_uart) = serial.split();
+
+    // Initialize LoRa module (433 MHz = 433,000,000 Hz)
+    let mut lora = LoRa::new(spi, cs, reset, 433_000_000, lora_delay)
+        .expect("Failed to initialize LoRa");
+
+    // Configure LoRa settings
+    lora.set_tx_power(17, 0).unwrap(); // 17 dBm output power
 
     // Display LoRa status
     display.clear(BinaryColor::Off).unwrap();
-    Text::with_baseline("E22-400M30S", Point::new(0, 0), text_style, Baseline::Top)
+    Text::with_baseline("LoRa Ready!", Point::new(0, 24), text_style, Baseline::Top)
         .draw(&mut display)
         .unwrap();
-    Text::with_baseline("LoRa Ready!", Point::new(0, 12), text_style, Baseline::Top)
-        .draw(&mut display)
-        .unwrap();
-    Text::with_baseline("UART @ 9600", Point::new(0, 24), text_style, Baseline::Top)
+    Text::with_baseline("Freq: 433MHz", Point::new(0, 36), text_style, Baseline::Top)
         .draw(&mut display)
         .unwrap();
     display.flush().unwrap();
-    
-    delay.delay_ms(100_u32);
 
     // Main loop - transmit LoRa and update display periodically
     let mut counter: u32 = 0;
@@ -148,42 +144,20 @@ fn main() -> ! {
     ];
     
     loop {
-        // Transmit a message via LoRa (E22 module in transparent transmission mode)
-        let message = b"Hello E22 LoRa!";
-        
-        // Send message byte by byte via UART
-        for &byte in message.iter() {
-            block!(tx_uart.write(byte)).ok();
-        }
-        
-        // Try to read any incoming data (non-blocking)
-        let mut rx_data = [0u8; 64];
-        let mut rx_count = 0;
-        for i in 0..64 {
-            match rx_uart.read() {
-                Ok(byte) => {
-                    rx_data[i] = byte;
-                    rx_count += 1;
-                }
-                Err(_) => break,
-            }
-        }
+        // Transmit a message via LoRa
+        let message = b"Hello LoRa!";
+        let mut buffer = [0u8; 255];
+        buffer[0..message.len()].copy_from_slice(message);
+        let _ = lora.transmit_payload_busy(buffer, message.len());
 
         // Update display with counter
         display.clear(BinaryColor::Off).unwrap();
-        Text::with_baseline("E22-400M30S", Point::new(0, 0), text_style, Baseline::Top)
+        Text::with_baseline("STM32F103C8T6", Point::new(0, 0), text_style, Baseline::Top)
             .draw(&mut display)
             .unwrap();
-        
-        if rx_count > 0 {
-            Text::with_baseline("RX Data OK", Point::new(0, 12), text_style, Baseline::Top)
-                .draw(&mut display)
-                .unwrap();
-        } else {
-            Text::with_baseline("TX OK", Point::new(0, 12), text_style, Baseline::Top)
-                .draw(&mut display)
-                .unwrap();
-        }
+        Text::with_baseline("LoRa TX OK", Point::new(0, 12), text_style, Baseline::Top)
+            .draw(&mut display)
+            .unwrap();
         
         // Display counter using lookup table
         let counter_text = COUNTER_LABELS[(counter % 10) as usize];
