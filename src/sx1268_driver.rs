@@ -109,9 +109,8 @@ where
         // 4. 设置内部电源模式 (DCDC)
         self.set_regulator_mode(0x01)?;
         
-        // 5. 启用 DIO2 控制射频开关 (E22-400M30S 内部使用 DIO2)
-        self.set_dio2_as_rf_switch(true)?;
-        defmt::info!("[SX1268] ✓ DIO2 作为 RF 开关已启用");
+        // 5. 禁止 DIO2 切换射频开关 (E22 使用外部 TXEN/RXEN)
+        self.set_dio2_as_rf_switch(false)?;
         
         // 6. 开启 TCXO (E22 使用 3.3V TCXO)
         self.set_dio3_as_tcxo(0x07, 320)?; // 3.3V, 10ms timeout
@@ -182,16 +181,23 @@ where
         // 5. 清除中断状态
         self.clear_irq_status(0xFFFF)?;
         
-        // 6. 进入发送模式 (DIO2 自动控制 RF 开关)
-        // E22-400M30S 内部 RF 开关由 DIO2 自动控制，无需手动切换
-        // 超时计算: 15.625μs per tick, 0x002710 = 10000 ticks = 156.25ms
-        let timeout = 0x002710; // ~156ms timeout
-        defmt::info!("[SX1268] → 进入发送模式 (超时: 0x{:06X} ~156ms)", timeout);
-        self.set_tx(timeout)?;
+        // 6. 切换 RF 开关到发送
+        self.hal.rf_switch_tx();
+        defmt::info!("[SX1268] RF 开关 -> TX");
         
-        // 7. 等待发送完成 (简化处理，实际应该检查中断)
-        defmt::info!("[SX1268] ⏳ 等待发送完成 ({}ms)", TX_COMPLETION_DELAY_MS);
+        // 7. 进入发送模式（使用合理的超时值）
+        // 超时计算: 15.625μs per tick, 0x001900 = 6400 ticks = 100ms
+        let timeout = 0x001900; // 100ms timeout
+        self.set_tx(timeout)?;
+        defmt::info!("[SX1268] → 进入发送模式 (超时: 0x{:06X})", timeout);
+        
+        // 8. 等待发送完成 (简化处理，实际应该检查中断)
         delay_fn(TX_COMPLETION_DELAY_MS);
+        defmt::info!("[SX1268] ⏳ 等待发送完成 ({}ms)", TX_COMPLETION_DELAY_MS);
+        
+        // 9. 关闭 RF 开关
+        self.hal.rf_switch_off();
+        defmt::info!("[SX1268] RF 开关 -> OFF");
         
         defmt::info!("[SX1268] ✓ 发送完成");
         Ok(())
