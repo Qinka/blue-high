@@ -9,28 +9,6 @@ STM32F103C8T6 MCU 控制程序 - OLED 和 LoRa 控制器
 - 亿佰特 E22-400M30S LoRa 无线模块 (SX1268 芯片，通过 SPI 接口)
 - USB CDC 虚拟串口 (用于 PC 与 LoRa 之间的控制)
 
-**E22-400M30S 官方手册**: https://www.ebyte.com/Uploadfiles/Files/2024-12-31/202412311627396369.pdf
-
-## LoRa 配置
-
-用户可以通过修改 `src/lora_config.rs` 文件来配置 LoRa 参数（频率、功率、带宽、扩频因子等）。
-
-详细配置说明请参阅 [LORA_CONFIG.md](LORA_CONFIG.md)。
-
-**可配置参数**：
-- 频率：410-510 MHz
-- 功率：10-30 dBm
-- 带宽：125/250/500 kHz  
-- 扩频因子：SF7-SF12
-- 编码率：CR4/5 到 CR4/8
-- 前导码长度、CRC、同步字等
-
-**预定义配置**：
-- `LoRaConfig::default()` - 默认配置（30dBm, BW500, SF11）
-- `LoRaConfig::long_range()` - 长距离模式（30dBm, BW125, SF12）
-- `LoRaConfig::fast_mode()` - 快速模式（27dBm, BW500, SF7）
-- `LoRaConfig::low_power()` - 低功耗模式（10dBm, BW125, SF9）
-
 ## 硬件连接
 
 ### OLED 显示屏 (I2C2)
