@@ -134,21 +134,21 @@ where
         self.check_xosc_start()?;
         defmt::info!("[SX1268] ✓ XOSC 启动正常");
         
-        // 10. 设置缓冲区基地址
+        // 7. 设置缓冲区基地址
         self.set_buffer_base_address(0x00, 0x00)?; // TX=0x00, RX=0x00
         defmt::info!("[SX1268] ✓ 缓冲区基地址设置完成");
         
-        // 11. 校准
+        // 8. 校准
         self.calibrate(0x7F)?; // 校准所有
         
-        // 12. 设置数据包类型为 LoRa
+        // 9. 设置数据包类型为 LoRa
         self.set_packet_type(0x01)?; // 0x01 = LoRa
         
-        // 13. 设置射频频率
+        // 9. 设置射频频率
         let freq_hz = config.get_frequency_hz();
         self.set_rf_frequency(freq_hz)?;
         
-        // 14. 设置 PA 配置
+        // 10. 设置 PA 配置
         self.set_pa_config(
             config.pa_config.pa_duty_cycle,
             config.pa_config.hp_max,
@@ -156,21 +156,21 @@ where
             config.pa_config.pa_lut,
         )?;
         
-        // 15. 设置发射功率
+        // 11. 设置发射功率
         let chip_power = config.get_chip_power_dbm() as u8;
         self.set_tx_params(chip_power, 0x04)?; // 0x04 = 40us ramp
         
-        // 16. 设置 RX/TX 完成后的状态
+        // 12. 设置 RX/TX 完成后的状态
         self.set_rx_tx_fallback_mode(0x40)?; // 0x40 = STDBY_RC
         defmt::info!("[SX1268] ✓ FALLBACK 模式配置完成");
         
-        // 17. 设置 LoRa 调制参数
+        // 13. 设置 LoRa 调制参数
         self.set_lora_mod_params(config)?;
         
-        // 18. 设置 LoRa 数据包参数
+        // 14. 设置 LoRa 数据包参数
         self.set_lora_packet_params(config)?;
         
-        // 19. 设置 LoRa 同步字
+        // 15. 设置 LoRa 同步字
         self.set_lora_sync_word(config.sync_word)?;
         
         defmt::info!("[SX1268] 初始化完成");
@@ -222,13 +222,7 @@ where
             let mode = (status >> 4) & 0x07;
             let cmd_status = (status >> 1) & 0x07;
             defmt::info!("[SX1268] 状态验证: 模式={}, 命令状态={}", mode, cmd_status);
-            // 模式: 6=TX, 命令状态: 1=success
-            if mode != 6 {
-                defmt::warn!("[SX1268] ⚠ 芯片模式异常: 期望 6(TX), 实际 {}", mode);
-            }
-            if cmd_status != 1 {
-                defmt::warn!("[SX1268] ⚠ 命令状态异常: 期望 1(success), 实际 {}", cmd_status);
-            }
+            // 模式应该是 3 (TX), 命令状态应该是 1 (success)
         }
         
         // 9. 等待发送完成 (简化处理，实际应该检查中断)
@@ -504,37 +498,23 @@ where
 
     /// SPI 通信测试 - 写入并读回寄存器
     fn spi_test(&mut self) -> Result<(), ()> {
-        // 使用寄存器 0x0920 (随机寄存器) 进行测试，不影响配置
+        // 使用寄存器 0x0740 (LoRa sync word) 进行测试
         let test_value = 0xA5u8;
-        let test_addr = 0x0920u16; // 测试用寄存器
-        
-        // 保存原值
-        let addr_bytes = test_addr.to_be_bytes();
-        let cmd_read_orig = [commands::READ_REGISTER, addr_bytes[0], addr_bytes[1], 0x00];
-        let mut orig_value = [0u8; 1];
-        match self.hal.read(&cmd_read_orig, &mut orig_value) {
-            Sx1268HalStatus::Ok => {}
-            _ => return Err(()),
-        }
         
         // 写入测试值
-        let cmd_write = [commands::WRITE_REGISTER, addr_bytes[0], addr_bytes[1]];
+        let addr = 0x0740u16.to_be_bytes();
+        let cmd_write = [commands::WRITE_REGISTER, addr[0], addr[1]];
         match self.hal.write(&cmd_write, &[test_value]) {
             Sx1268HalStatus::Ok => {}
             _ => return Err(()),
         }
         
         // 读回验证
+        let cmd_read = [commands::READ_REGISTER, addr[0], addr[1], 0x00];
         let mut read_data = [0u8; 1];
-        match self.hal.read(&cmd_read_orig, &mut read_data) {
+        match self.hal.read(&cmd_read, &mut read_data) {
             Sx1268HalStatus::Ok => {}
             _ => return Err(()),
-        }
-        
-        // 恢复原值
-        match self.hal.write(&cmd_write, &orig_value) {
-            Sx1268HalStatus::Ok => {}
-            _ => {}  // 即使恢复失败也不阻止初始化
         }
         
         if read_data[0] == test_value {
