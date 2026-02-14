@@ -57,15 +57,6 @@ STM32F103C8T6 MCU 控制程序 - OLED 和 LoRa 控制器
    - PC 通过 USB 串口控制 LoRa 模块
    - 实时显示传输状态
 
-5. **实时调试日志 (defmt)**
-   - 集成 defmt 日志系统，通过 probe-rs 实时输出
-   - 中文日志消息，易于理解调试信息
-   - 表情符号标记不同类型的事件
-   - 监控系统启动、时钟配置、外设初始化
-   - 跟踪 USB-LoRa 数据桥接活动
-   - 主循环心跳计数器
-   - SPI 传输详细日志
-
 ## 开发环境设置
 
 ### 安装 Rust 工具链
@@ -103,30 +94,8 @@ cargo check
 ### 使用 probe-rs (推荐)
 
 ```bash
-# 烧录并查看 defmt 调试输出
 cargo run --release
-
-# 程序会在 probe-rs 中显示实时日志，包括：
-# 🚀 启动序列信息
-# ⏰ 时钟配置 (72MHz 系统时钟, 36MHz APB1)
-# 📺 OLED 初始化状态
-# 📡 E22-400M30S LoRa 模块状态
-# 📥📤 USB 与 LoRa SPI 数据传输活动
-# 💓 主循环心跳监控
 ```
-
-### 查看调试日志
-
-本项目集成了 `defmt` 日志系统，通过 probe-rs 可以实时查看设备运行状态：
-
-- 系统启动和初始化过程
-- 时钟配置信息
-- 外设就绪状态 (OLED, USB, E22 LoRa)
-- USB 到 LoRa 的数据桥接活动
-- SPI 传输详情
-- 错误诊断信息
-
-所有日志消息都使用中文和表情符号，便于快速识别不同类型的事件。
 
 ### 使用 OpenOCD
 
@@ -199,16 +168,12 @@ blue-high/
 
 - `stm32f1xx-hal`: STM32F1 系列硬件抽象层
 - `cortex-m-rt`: Cortex-M 运行时
-- `cortex-m`: Cortex-M 核心功能 (启用 critical-section 支持)
 - `embedded-hal`: 嵌入式硬件抽象接口
 - `ssd1306`: OLED 显示驱动
 - `embedded-graphics`: 嵌入式图形库
 - `usb-device`: USB 设备支持
 - `usbd-serial`: USB CDC 串口类驱动
-- `defmt`: 高效日志框架
-- `defmt-rtt`: RTT 传输层用于 defmt 日志
-- `panic-probe`: 支持 defmt 的 panic 处理器
-- `portable-atomic`: 提供原子操作支持
+- `panic-halt`: 简单的 panic 处理
 
 **注意**: SX1268 LoRa 驱动可根据具体需求添加（如 `sx126x` 或 `sx1262` 等）
 
