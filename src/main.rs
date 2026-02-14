@@ -8,7 +8,7 @@ use stm32f1xx_hal::{
     pac,
     prelude::*,
     i2c::{BlockingI2c, DutyCycle, Mode},
-    spi::{Spi, Mode as SpiMode, Phase, Polarity},
+    serial::{Config, Serial},
     usb::{Peripheral, UsbBus},
 };
 
@@ -26,6 +26,8 @@ use embedded_graphics::{
 use usb_device::prelude::*;
 use usbd_serial::{SerialPort, USB_CLASS_CDC};
 
+use nb::block;
+
 #[entry]
 fn main() -> ! {
     // Get access to the device specific peripherals from the peripheral access crate
@@ -37,17 +39,17 @@ fn main() -> ! {
     let rcc = dp.RCC.constrain();
 
     // Freeze the configuration of all the clocks in the system and store the frozen frequencies in
-    // `clocks`. Configure 72MHz system clock with USB support
+    // `clocks`. Configure for USB (48 MHz required)
     let clocks = rcc
         .cfgr
         .use_hse(8.MHz())
-        .sysclk(72.MHz())
-        .pclk1(36.MHz())
+        .sysclk(48.MHz())
+        .pclk1(24.MHz())
         .freeze(&mut flash.acr);
 
     // Acquire the GPIO and AFIO peripherals
     let mut gpiob = dp.GPIOB.split();
-    let mut gpioa = dp.GPIOA.split();
+    let gpioa = dp.GPIOA.split();
     let mut afio = dp.AFIO.constrain();
     
     // Create delay abstraction using TIM2
@@ -122,65 +124,41 @@ fn main() -> ! {
         .build();
 
     // ========================================
-    // E22-400M30S LoRa SPI Setup
+    // E22-400M30S LoRa UART Setup (PA9/PA10)
     // ========================================
-    // The E22-400M30S uses SPI communication with SX1268 chip
-    // SPI pins: SCK = PA5, MISO = PA6, MOSI = PA7
-    // Control pins: NSS = PA4, BUSY = PA3, DIO1 = PA2, NRST = PA1
+    // UART1 for LoRa communication
+    let tx = gpioa.pa9.into_alternate_push_pull(&mut gpioa_crh);
+    let rx = gpioa.pa10;
     
-    // SPI pins configuration
-    let sck = gpioa.pa5.into_alternate_push_pull(&mut gpioa.crl);
-    let miso = gpioa.pa6;
-    let mosi = gpioa.pa7.into_alternate_push_pull(&mut gpioa.crl);
-
-    // Control pins
-    let mut nss = gpioa.pa4.into_push_pull_output(&mut gpioa.crl);
-    let _busy = gpioa.pa3.into_floating_input(&mut gpioa.crl);
-    let _dio1 = gpioa.pa2.into_floating_input(&mut gpioa.crl);
-    let mut nrst = gpioa.pa1.into_push_pull_output(&mut gpioa.crl);
-
-    // Configure SPI1
-    let mut spi = Spi::spi1(
-        dp.SPI1,
-        (sck, miso, mosi),
+    let serial_lora = Serial::new(
+        dp.USART1,
+        (tx, rx),
         &mut afio.mapr,
-        SpiMode {
-            polarity: Polarity::IdleLow,
-            phase: Phase::CaptureOnFirstTransition,
-        },
-        1.MHz(),
-        clocks,
+        Config::default().baudrate(9600.bps()),
+        &clocks,
     );
-
-    // Initialize E22-400M30S control pins
-    nss.set_high(); // Deselect initially
-    nrst.set_high(); // Keep module active
     
-    // Reset sequence for SX1268
-    nrst.set_low();
-    delay.delay_ms(10_u32);
-    nrst.set_high();
-    delay.delay_ms(10_u32);
+    let (mut tx_lora, mut rx_lora) = serial_lora.split();
 
     // Display status
     display.clear(BinaryColor::Off).unwrap();
-    Text::with_baseline("USB-LoRa SPI", Point::new(0, 0), text_style, Baseline::Top)
+    Text::with_baseline("USB-LoRa", Point::new(0, 0), text_style, Baseline::Top)
         .draw(&mut display)
         .unwrap();
-    Text::with_baseline("E22 Ready", Point::new(0, 12), text_style, Baseline::Top)
+    Text::with_baseline("Bridge Ready", Point::new(0, 12), text_style, Baseline::Top)
         .draw(&mut display)
         .unwrap();
-    Text::with_baseline("72MHz", Point::new(0, 24), text_style, Baseline::Top)
+    Text::with_baseline("9600 baud", Point::new(0, 24), text_style, Baseline::Top)
         .draw(&mut display)
         .unwrap();
     display.flush().unwrap();
     
     delay.delay_ms(100_u32);
 
-    // Main loop - USB to SPI bridge for LoRa control
+    // Main loop - transparent data bridge
     const BUFFER_SIZE: usize = 64;
     let mut usb_buf = [0u8; BUFFER_SIZE];
-    let mut _spi_buf = [0u8; BUFFER_SIZE];
+    let mut lora_buf = [0u8; BUFFER_SIZE];
     
     loop {
         // Poll USB
@@ -188,26 +166,23 @@ fn main() -> ! {
             continue;
         }
         
-        // USB -> LoRa SPI: Read from USB and send to LoRa via SPI
+        // USB -> LoRa: Read from USB and send to LoRa
         match serial.read(&mut usb_buf) {
             Ok(count) if count > 0 => {
-                // Send data to LoRa via SPI
-                nss.set_low(); // Select chip
-                
+                // Send data to LoRa UART
                 for i in 0..count {
-                    if let Ok(_) = spi.transfer(&mut [usb_buf[i]]) {
-                        // Data transferred
+                    if let Err(_) = block!(tx_lora.write(usb_buf[i])) {
+                        // If write fails, stop transmitting this batch
+                        break;
                     }
                 }
-                
-                nss.set_high(); // Deselect chip
                 
                 // Update display
                 display.clear(BinaryColor::Off).unwrap();
                 Text::with_baseline("USB->LoRa", Point::new(0, 0), text_style, Baseline::Top)
                     .draw(&mut display)
                     .unwrap();
-                Text::with_baseline("SPI TX", Point::new(0, 12), text_style, Baseline::Top)
+                Text::with_baseline("TX OK", Point::new(0, 12), text_style, Baseline::Top)
                     .draw(&mut display)
                     .unwrap();
                 display.flush().unwrap();
@@ -215,7 +190,40 @@ fn main() -> ! {
             _ => {}
         }
         
-        // For SPI-based LoRa, data reception would require polling the module
-        // or using DIO1 interrupt. This is a simplified example showing USB control
+        // LoRa -> USB: Read from LoRa and send to USB
+        let mut lora_count = 0;
+        for i in 0..BUFFER_SIZE {
+            match rx_lora.read() {
+                Ok(byte) => {
+                    lora_buf[i] = byte;
+                    lora_count += 1;
+                }
+                Err(nb::Error::WouldBlock) => break,
+                Err(_) => break,
+            }
+        }
+        
+        if lora_count > 0 {
+            // Send data to USB
+            let mut write_offset = 0;
+            while write_offset < lora_count {
+                match serial.write(&lora_buf[write_offset..lora_count]) {
+                    Ok(len) => {
+                        write_offset += len;
+                    }
+                    Err(_) => break,
+                }
+            }
+            
+            // Update display
+            display.clear(BinaryColor::Off).unwrap();
+            Text::with_baseline("LoRa->USB", Point::new(0, 0), text_style, Baseline::Top)
+                .draw(&mut display)
+                .unwrap();
+            Text::with_baseline("RX OK", Point::new(0, 12), text_style, Baseline::Top)
+                .draw(&mut display)
+                .unwrap();
+            display.flush().unwrap();
+        }
     }
 }

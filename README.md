@@ -6,8 +6,8 @@ STM32F103C8T6 MCU 控制程序 - OLED 和 LoRa 控制器
 
 这是一个使用 Rust 语言开发的 STM32F103C8T6 微控制器程序，能够同时控制：
 - 0.96寸 OLED 屏幕 (SSD1306，通过 I2C 接口)
-- 亿佰特 E22-400M30S LoRa 无线模块 (SX1268 芯片，通过 SPI 接口)
-- USB CDC 虚拟串口 (用于 PC 与 LoRa 之间的控制)
+- 亿佰特 E22-400M30S LoRa 无线模块 (通过 UART 接口)
+- USB CDC 虚拟串口 (用于 PC 与 LoRa 之间的透传)
 
 ## 硬件连接
 
@@ -17,14 +17,9 @@ STM32F103C8T6 MCU 控制程序 - OLED 和 LoRa 控制器
 - VCC -> 3.3V
 - GND -> GND
 
-### E22-400M30S LoRa 模块 (SPI)
-- SCK -> PA5
-- MISO -> PA6
-- MOSI -> PA7
-- NSS -> PA4
-- BUSY -> PA3
-- DIO1 -> PA2
-- NRST -> PA1
+### E22-400M30S LoRa 模块 (UART)
+- TXD -> PA10 (STM32 RX)
+- RXD -> PA9 (STM32 TX)
 - VCC -> 3.3V
 - GND -> GND
 
@@ -38,23 +33,22 @@ STM32F103C8T6 MCU 控制程序 - OLED 和 LoRa 控制器
 1. **OLED 显示**
    - 初始化 SSD1306 OLED 显示器
    - 显示系统状态信息
-   - 显示 USB 和 LoRa SPI 传输状态
+   - 显示 USB 和 LoRa 数据传输状态
 
 2. **USB CDC 虚拟串口**
    - 作为 USB 从设备连接到 PC
    - 创建虚拟 COM 端口
    - 支持标准串口通信
-   - 系统时钟 72MHz，USB 时钟通过 PLL 提供 48MHz
 
-3. **LoRa SPI 通信**
-   - 使用亿佰特 E22-400M30S 模块（SX1268 芯片）
-   - SPI 接口通信
-   - 1 MHz SPI 时钟频率
-   - 支持通过 USB 控制 LoRa 模块
+3. **LoRa 通信**
+   - 使用亿佰特 E22-400M30S 模块
+   - UART 通信，波特率 9600
+   - 支持透明传输模式
 
-4. **数据控制**
-   - USB 接收数据通过 SPI 发送到 LoRa
-   - PC 通过 USB 串口控制 LoRa 模块
+4. **数据透传**
+   - USB <-> LoRa 双向透传
+   - PC 通过 USB 串口发送数据到 LoRa
+   - LoRa 接收数据通过 USB 发送到 PC
    - 实时显示传输状态
 
 ## 开发环境设置
@@ -120,7 +114,7 @@ arm-none-eabi-gdb target/thumbv7m-none-eabi/release/blue-high
 
 1. 通过 ST-Link 烧录程序到 STM32F103C8T6
 2. 连接 OLED 显示屏到 I2C 接口 (PB6/PB7)
-3. 连接 E22-400M30S LoRa 模块到 SPI1 (PA5/PA6/PA7 及控制引脚)
+3. 连接 E22-400M30S LoRa 模块到 UART1 (PA9/PA10)
 4. 通过 USB Type-C 线连接到 PC
 
 ### 2. 使用 USB 串口
@@ -142,14 +136,13 @@ screen /dev/ttyACM0 9600
 minicom -D /dev/ttyACM0 -b 9600
 ```
 
-### 4. 控制 LoRa
+### 4. 数据透传
 
-- 在串口终端输入数据，数据会通过 SPI 发送到 E22-400M30S
-- 可以发送 SX1268 命令来配置和控制 LoRa 模块
-- OLED 屏幕实时显示传输状态
-  - "USB->LoRa" + "SPI TX": USB 数据通过 SPI 发送到 LoRa
-
-**注意**: 完整的 SX1268 驱动可以根据需求添加，当前实现提供了基本的 SPI 通信框架。
+- 在串口终端输入数据，数据会通过 LoRa 发送
+- LoRa 接收的数据会显示在串口终端
+- OLED 屏幕实时显示传输方向和状态
+  - "USB->LoRa" + "TX OK": USB 数据发送到 LoRa
+  - "LoRa->USB" + "RX OK": LoRa 数据接收并发送到 USB
 
 ## 项目结构
 
@@ -173,9 +166,8 @@ blue-high/
 - `embedded-graphics`: 嵌入式图形库
 - `usb-device`: USB 设备支持
 - `usbd-serial`: USB CDC 串口类驱动
+- `nb`: 非阻塞 I/O 支持
 - `panic-halt`: 简单的 panic 处理
-
-**注意**: SX1268 LoRa 驱动可根据具体需求添加（如 `sx126x` 或 `sx1262` 等）
 
 ## 故障排除
 
@@ -198,12 +190,11 @@ blue-high/
 
 ### LoRa 通信问题
 
-1. 检查 SPI 接线（SCK、MISO、MOSI、NSS）
+1. 检查 UART 接线（TXD 连 RX，RXD 连 TX）
 2. 确认天线已正确连接
-3. 检查控制引脚（BUSY、DIO1、NRST）
-4. 使用逻辑分析仪验证 SPI 通信
+3. 检查波特率设置（默认 9600）
+4. 使用串口调试工具测试 E22 模块
 5. 确认模块供电正常（3.3V）
-6. 检查 SPI 时钟频率设置
 
 ### USB 连接问题
 
