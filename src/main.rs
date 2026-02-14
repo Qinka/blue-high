@@ -136,13 +136,8 @@ fn main() -> ! {
         .unwrap();
     display.flush().unwrap();
 
-    // Main loop - transmit LoRa and update display periodically
+    // Main loop
     let mut counter: u32 = 0;
-    const COUNTER_LABELS: [&str; 10] = [
-        "Count: 0", "Count: 1", "Count: 2", "Count: 3", "Count: 4",
-        "Count: 5", "Count: 6", "Count: 7", "Count: 8", "Count: 9"
-    ];
-    
     loop {
         // Transmit a message via LoRa
         let message = b"Hello LoRa!";
@@ -159,8 +154,29 @@ fn main() -> ! {
             .draw(&mut display)
             .unwrap();
         
-        // Display counter using lookup table
-        let counter_text = COUNTER_LABELS[(counter % 10) as usize];
+        // Simple counter display (convert to string would need alloc)
+        let counter_text = if counter % 10 == 0 {
+            "Count: 0"
+        } else if counter % 10 == 1 {
+            "Count: 1"
+        } else if counter % 10 == 2 {
+            "Count: 2"
+        } else if counter % 10 == 3 {
+            "Count: 3"
+        } else if counter % 10 == 4 {
+            "Count: 4"
+        } else if counter % 10 == 5 {
+            "Count: 5"
+        } else if counter % 10 == 6 {
+            "Count: 6"
+        } else if counter % 10 == 7 {
+            "Count: 7"
+        } else if counter % 10 == 8 {
+            "Count: 8"
+        } else {
+            "Count: 9"
+        };
+        
         Text::with_baseline(counter_text, Point::new(0, 24), text_style, Baseline::Top)
             .draw(&mut display)
             .unwrap();
