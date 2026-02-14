@@ -58,7 +58,6 @@ fn main() -> ! {
     // Acquire the GPIO and AFIO peripherals
     let mut gpiob = dp.GPIOB.split(&mut rcc);
     let mut gpioa = dp.GPIOA.split(&mut rcc);
-    // AFIO is still initialized to enable alternate function remapping for peripherals
     let _afio = dp.AFIO.constrain(&mut rcc);
     
     // Create delay abstraction using TIM2
@@ -160,7 +159,6 @@ fn main() -> ! {
     let mut nrst = gpioa.pa1.into_push_pull_output(&mut gpioa.crl);
 
     // Configure SPI1
-    // Note: pins are wrapped in Option to support partial configurations (e.g., NoMiso for write-only)
     let mut spi = Spi::new(
         dp.SPI1,
         (Some(sck), Some(miso), Some(mosi)),
