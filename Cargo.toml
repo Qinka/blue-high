@@ -2,7 +2,8 @@
 name = "blue-high"
 version = "0.1.0"
 edition = "2024"
-authors = ["Qinka"]
+authors = [ "Johann Li <me@qinka.pro> @Qinka" ]
+description = " A Rust driven embedded project for STM32F103C8T6 with LoRa"
 
 [dependencies]
 cortex-m = { version = "0.7", features = ["critical-section-single-core"] }
@@ -28,7 +29,7 @@ usb-device = "0.3.2"
 usbd-serial = "0.2.2"
 
 # SX1268 LoRa
-sx1268-rs = { path = "../sx1268-rs" }
+sx1268-rs = { git = "https://github.com/Qinka/sx1268-rs", branch = "main" }
 
 # String formatting without heap allocation
 heapless = "0.9"
