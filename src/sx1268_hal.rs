@@ -55,16 +55,16 @@ where
     }
 
     /// 模块复位
-    pub fn reset(&mut self, delay_fn: &mut dyn FnMut(u32)) -> Sx1268HalStatus {
+    pub fn reset(&mut self, delay_ms: &mut dyn FnMut(u32)) -> Sx1268HalStatus {
         defmt::debug!("[SX1268] 执行硬件复位");
         
         // E22 RESET 引脚先拉低触发复位
         let _ = self.nrst.set_low();
-        delay_fn(10);
+        delay_ms(10);
         
         // E22 RESET 引脚再拉高恢复正常
         let _ = self.nrst.set_high();
-        delay_fn(10);
+        delay_ms(10);
         
         Sx1268HalStatus::Ok
     }
@@ -72,12 +72,9 @@ where
     /// 忙状态等待
     /// E22 BUSY 引脚高电平表示忙，需要等待
     pub fn wait_on_busy(&mut self) {
-        const MAX_BUSY_WAIT_ITERATIONS: u32 = 10000;
-        let mut timeout = MAX_BUSY_WAIT_ITERATIONS;
+        let mut timeout = 10000;
         while self.busy.is_high().unwrap_or(false) && timeout > 0 {
             timeout -= 1;
-            // Small delay to avoid tight CPU loop
-            cortex_m::asm::delay(100); // ~100 cycles delay
         }
         
         if timeout == 0 {
@@ -86,16 +83,16 @@ where
     }
 
     /// 模块唤醒
-    pub fn wakeup(&mut self, delay_fn: &mut dyn FnMut(u32)) -> Sx1268HalStatus {
+    pub fn wakeup(&mut self, delay_ms: &mut dyn FnMut(u32)) -> Sx1268HalStatus {
         defmt::debug!("[SX1268] 唤醒模块");
         
         // E22 SPI CS(NSS) 引脚先拉低触发唤醒
         let _ = self.nss.set_low();
-        delay_fn(1);
+        delay_ms(1);
         
         // E22 SPI CS(NSS) 引脚再拉高恢复正常
         let _ = self.nss.set_high();
-        delay_fn(1);
+        delay_ms(1);
         
         Sx1268HalStatus::Ok
     }
