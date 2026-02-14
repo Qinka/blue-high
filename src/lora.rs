@@ -1,9 +1,8 @@
-
 use core::ops::{Deref, DerefMut};
 
+use stm32f1xx_hal::gpio::{Input, Output, Pin};
 use stm32f1xx_hal::pac::sdio::sta;
 use stm32f1xx_hal::spi::{Instance, Spi};
-use stm32f1xx_hal::gpio::{Input, Output, Pin};
 use sx1268_rs::{Status, Sx1268, control::Control};
 
 #[derive(Debug)]
@@ -21,8 +20,25 @@ fn spi_error<SE>(error: SE) -> sx1268_rs::Error<ControlError<SE>> {
 // }
 
 /// Wrapper type to implement Control trait for Spi
-pub struct LoraControl<W, S, const NRST_P: char, const NRST_N: u8, NrstMode, const CS_P: char, const CS_N: u8, CsMode, const BUSY_P: char, const BUSY_N: u8, BusyMode, const TX_P: char, const TX_N: u8, TxMode, const RX_P: char, const RX_N: u8, RxMode>
-where
+pub struct LoraControl<
+  W,
+  S,
+  const NRST_P: char,
+  const NRST_N: u8,
+  NrstMode,
+  const CS_P: char,
+  const CS_N: u8,
+  CsMode,
+  const BUSY_P: char,
+  const BUSY_N: u8,
+  BusyMode,
+  const TX_P: char,
+  const TX_N: u8,
+  TxMode,
+  const RX_P: char,
+  const RX_N: u8,
+  RxMode,
+> where
   S: Instance,
 {
   pub spi: Spi<S, W>,
@@ -33,12 +49,48 @@ where
   pub rx_pin: Pin<RX_P, RX_N, Output<RxMode>>,
 }
 
-impl<S, const NRST_P: char, const NRST_N: u8, NrstMode, const CS_P: char, const CS_N: u8, CsMode, const BUSY_P: char, const BUSY_N: u8, BusyMode, const TX_P: char, const TX_N: u8, TxMode, const RX_P: char, const RX_N: u8, RxMode> Control for LoraControl<u8, S, NRST_P, NRST_N, NrstMode, CS_P, CS_N, CsMode, BUSY_P, BUSY_N, BusyMode, TX_P, TX_N, TxMode, RX_P, RX_N, RxMode>
+impl<
+  S,
+  const NRST_P: char,
+  const NRST_N: u8,
+  NrstMode,
+  const CS_P: char,
+  const CS_N: u8,
+  CsMode,
+  const BUSY_P: char,
+  const BUSY_N: u8,
+  BusyMode,
+  const TX_P: char,
+  const TX_N: u8,
+  TxMode,
+  const RX_P: char,
+  const RX_N: u8,
+  RxMode,
+> Control
+  for LoraControl<
+    u8,
+    S,
+    NRST_P,
+    NRST_N,
+    NrstMode,
+    CS_P,
+    CS_N,
+    CsMode,
+    BUSY_P,
+    BUSY_N,
+    BusyMode,
+    TX_P,
+    TX_N,
+    TxMode,
+    RX_P,
+    RX_N,
+    RxMode,
+  >
 where
   S: Instance,
 {
   type Status = Status;
-  type Error =  sx1268_rs::Error<ControlError<stm32f1xx_hal::spi::Error>>;
+  type Error = sx1268_rs::Error<ControlError<stm32f1xx_hal::spi::Error>>;
 
   // -----------------------------------------------------------------------
   // Low-level SPI helpers
@@ -89,11 +141,7 @@ where
 
   /// Read from registers starting at the given address.
   fn read_register(&mut self, address: u16, data: &mut [u8]) -> Result<(), Self::Error> {
-    let header = [
-      0x1D,
-      (address >> 8) as u8,
-      address as u8,
-    ];
+    let header = [0x1D, (address >> 8) as u8, address as u8];
     while self.busy_pin.is_high() {}
     self.cs_pin.set_low();
     self.spi.deref_mut().write(&header).map_err(spi_error)?;
@@ -135,7 +183,11 @@ where
     while self.busy_pin.is_high() {}
     self.cs_pin.set_low();
     self.spi.deref_mut().write(&[0xC0]).map_err(spi_error)?;
-    self.spi.deref_mut().read(&mut status_byte).map_err(spi_error)?;
+    self
+      .spi
+      .deref_mut()
+      .read(&mut status_byte)
+      .map_err(spi_error)?;
     self.cs_pin.set_high();
     let status = Status::from(status_byte[0]);
     defmt::debug!("GetStatus status={}", status);
@@ -165,13 +217,9 @@ where
     Ok(())
   }
 
-
   fn switch_tx(&mut self, _: u32) -> Result<(), Self::Error> {
     self.rx_pin.set_low();
     self.tx_pin.set_high();
     Ok(())
   }
-
 }
-
-
