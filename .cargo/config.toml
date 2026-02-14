@@ -7,4 +7,4 @@ rustflags = [
 ]
 
 [target.'cfg(all(target_arch = "arm", target_os = "none"))']
-runner = "probe-rs run --chip STM32F103C8"
+runner = "probe-run --chip STM32F103C8"
