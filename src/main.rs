@@ -63,15 +63,15 @@ fn main() -> ! {
     let mut delay = dp.TIM2.delay_us(&clocks);
 
     // ========================================
-    // OLED Display Setup (I2C2 on PB10/PB11)
+    // OLED Display Setup (I2C on PB6/PB7)
     // ========================================
-    Diag::oled_status("初始化 OLED 显示屏 (I2C2 @ PB10/PB11)");
-    let i2c_scl = gpiob.pb10.into_alternate_open_drain(&mut gpiob.crh);
-    let i2c_sda = gpiob.pb11.into_alternate_open_drain(&mut gpiob.crh);
+    let scl = gpiob.pb6.into_alternate_open_drain(&mut gpiob.crl);
+    let sda = gpiob.pb7.into_alternate_open_drain(&mut gpiob.crl);
 
-    let i2c = BlockingI2c::i2c2(
-        dp.I2C2,
-        (i2c_scl, i2c_sda),
+    let i2c = BlockingI2c::i2c1(
+        dp.I2C1,
+        (scl, sda),
+        &mut afio.mapr,
         Mode::Fast {
             frequency: 400_000.Hz(),
             duty_cycle: DutyCycle::Ratio2to1,
