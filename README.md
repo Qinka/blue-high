@@ -117,9 +117,8 @@ blue-high/
 - `embedded-hal`: 嵌入式硬件抽象接口
 - `ssd1306`: OLED 显示驱动
 - `embedded-graphics`: 嵌入式图形库
+- `sx126x`: SX126x 系列 LoRa 芯片驱动
 - `panic-halt`: 简单的 panic 处理
-
-**注意**: SX1268 LoRa 驱动可根据具体需求添加（如 `sx126x` 或 `sx1262` 等）
 
 ## 故障排除
 
