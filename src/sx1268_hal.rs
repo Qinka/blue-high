@@ -133,10 +133,6 @@ where
     }
 
     /// 寄存器读取
-    /// 
-    /// 注意：SX1268 的 SPI 协议是全双工的
-    /// 在发送命令字节的同时，MISO 线上会返回响应数据
-    /// 对于 READ_REGISTER，实际数据在发送最后一个字节（NOP）时返回
     pub fn read(&mut self, command: &[u8], data: &mut [u8]) -> Sx1268HalStatus {
         // 等待空闲
         self.wait_on_busy();
@@ -144,26 +140,17 @@ where
         // NSS 拉低选中
         let _ = self.nss.set_low();
         
-        // SPI 发送命令，同时接收响应
-        // 对于 READ_REGISTER [0x1D, Addr_H, Addr_L, NOP]：
-        // - 前3个字节返回状态
-        // - 第4个字节（NOP）返回实际寄存器数据
-        let cmd_len = command.len();
-        for (i, byte) in command.iter().enumerate() {
+        // SPI 发送命令
+        for byte in command {
             let mut buf = [*byte];
             if let Err(_) = self.spi.transfer_in_place(&mut buf) {
                 let _ = self.nss.set_high();
                 return Sx1268HalStatus::Error;
             }
-            
-            // 如果这是最后一个命令字节（通常是 NOP），保存响应到 data
-            if i == cmd_len - 1 && !data.is_empty() {
-                data[0] = buf[0];
-            }
         }
         
-        // 如果 data 长度 > 1，继续读取额外的字节
-        for byte in data.iter_mut().skip(1) {
+        // SPI 读取响应数据
+        for byte in data.iter_mut() {
             let mut buf = [0x00];
             if let Err(_) = self.spi.transfer_in_place(&mut buf) {
                 let _ = self.nss.set_high();
