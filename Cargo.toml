@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2024"
 authors = [ "Johann Li <me@qinka.pro> @Qinka" ]
 description = " A Rust driven embedded project for STM32F103C8T6 with LoRa"
+license = "Apache-2.0"
 
 [dependencies]
 cortex-m = { version = "0.7", features = ["critical-section-single-core"] }
@@ -22,7 +23,7 @@ stm32f1xx-hal = { version = "0.11.0", features = ["stm32f103"] }
 
 # OLED display driver (SSD1306 via I2C)
 ssd1306 = "0.10.0"
-embedded-graphics = "0.8.1"
+embedded-graphics = "0.8"
 
 # USB CDC support
 usb-device = "0.3.2"

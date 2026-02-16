@@ -1,3 +1,16 @@
+// 该文件是 BlueHigh 项目的一部分。
+// src/main.rs - 主程序入口
+//
+// 本文件根据 Apache 许可证第 2.0 版（以下简称“许可证”）授权使用；
+// 除非遵守该许可证条款，否则您不得使用本文件。
+// 您可通过以下网址获取许可证副本：
+// http://www.apache.org/licenses/LICENSE-2.0
+// 除非适用法律要求或书面同意，根据本许可协议分发的软件均按“原样”提供，
+// 不附带任何形式的明示或暗示的保证或条件。
+// 有关许可权限与限制的具体条款，请参阅本许可协议。
+//
+// Copyright (C) 2026 Johann Li <me@qinka.pro>, Wareless Group
+
 #![no_std]
 #![no_main]
 
@@ -17,10 +30,9 @@ use sx1268_rs::{
   Sx1268, Sx1268Config,
   config::{
     CalibrationParams, FallbackMode, LoRaBandwidth, LoRaCodingRate, LoRaHeaderType,
-    LoRaModulationParams, LoRaPacketParams, LoRaSpreadingFactor, PaConfig, PacketType, RampTime,
-    RegulatorMode, SleepConfig, StandbyConfig, TcxoConfig, TcxoVoltage,
+    LoRaModulationParams, LoRaPacketParams, LoRaSpreadingFactor, PaConfig, RampTime,
+    RegulatorMode, TcxoVoltage,
   },
-  control::Control,
 };
 
 use cortex_m_rt::entry;
@@ -42,8 +54,6 @@ use ssd1306::{I2CDisplayInterface, Ssd1306, prelude::*};
 
 use usb_device::prelude::*;
 use usbd_serial::{SerialPort, USB_CLASS_CDC};
-
-use embedded_hal::spi::SpiDevice;
 
 use crate::lora::LoraControl;
 
@@ -297,7 +307,7 @@ fn main() -> ! {
     .expect("LoRa 发送测试失败");
 
   // 初始化 SX1268 芯片
-  let mut delay_fn = |ms: u32| delay.delay_ms(ms);
+  // let mut delay_fn = |ms: u32| delay.delay_ms(ms);
 
   // Display status with configuration
   display.clear(BinaryColor::Off).unwrap();
@@ -379,7 +389,7 @@ fn main() -> ! {
   let mut loop_counter: u32 = 0;
 
   // Create delay closure once outside the loop
-  let mut delay_fn = |ms: u32| delay.delay_ms(ms);
+  // let mut delay_fn = |ms: u32| delay.delay_ms(ms);
 
   loop {
     loop_counter = loop_counter.wrapping_add(1);

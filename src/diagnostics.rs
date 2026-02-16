@@ -1,3 +1,17 @@
+// 该文件是 BlueHigh 项目的一部分。
+// src/diagnostics.rs - 诊断模块
+//
+// 本文件根据 Apache 许可证第 2.0 版（以下简称“许可证”）授权使用；
+// 除非遵守该许可证条款，否则您不得使用本文件。
+// 您可通过以下网址获取许可证副本：
+// http://www.apache.org/licenses/LICENSE-2.0
+// 除非适用法律要求或书面同意，根据本许可协议分发的软件均按“原样”提供，
+// 不附带任何形式的明示或暗示的保证或条件。
+// 有关许可权限与限制的具体条款，请参阅本许可协议。
+//
+// Copyright (C) 2026 Johann Li <me@qinka.pro>, Wareless Group
+
+
 // Blue-High 项目诊断模块
 // 专为 E22-400M30S LoRa 桥接器设计的调试输出
 
@@ -58,7 +72,7 @@ impl BlueHighDiagnostics {
       // 方法2：显示可打印的 ASCII 内容
       let mut ascii_repr = heapless::String::<MAX_CHUNK_SIZE>::new();
       for &byte in chunk {
-        if byte >= 0x20 && byte <= 0x7E {
+        if (0x20..=0x7E).contains(&byte) {
           // 可打印 ASCII 字符
           let _ = ascii_repr.push(byte as char);
         } else {
@@ -100,7 +114,7 @@ impl BlueHighDiagnostics {
 
   // 主循环心跳
   pub fn heartbeat(loop_count: u32) {
-    if loop_count % 1000 == 0 {
+    if loop_count.is_multiple_of(1000) {
       defmt::println!("💓 [心跳] 运行计数: {}", loop_count);
     }
   }
