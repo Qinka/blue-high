@@ -1,5 +1,8 @@
 # blue-high
 
+# 说明： 如下内容为 AI 生成，八成不对
+
+
 STM32F103C8T6 MCU 控制程序 - OLED 和 LoRa 控制器
 
 ## 项目概述
@@ -20,7 +23,7 @@ STM32F103C8T6 MCU 控制程序 - OLED 和 LoRa 控制器
 **可配置参数**：
 - 频率：410-510 MHz
 - 功率：10-30 dBm
-- 带宽：125/250/500 kHz  
+- 带宽：125/250/500 kHz
 - 扩频因子：SF7-SF12
 - 编码率：CR4/5 到 CR4/8
 - 前导码长度、CRC、同步字等
@@ -231,7 +234,7 @@ cargo run --release
 # 💓 主循环心跳监控
 ```
 
-**注意**: 
+**注意**:
 - RTT (Real-Time Transfer) 是纯软件实现
 - 所有 SWD 调试器都支持 RTT
 - probe-rs 默认支持 RTT 输出
