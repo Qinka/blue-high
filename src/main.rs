@@ -14,12 +14,8 @@
 #![no_std]
 #![no_main]
 
-// Blue-High 调试基础设施 - 使用 RTT 输出
-// use defmt_rtt as _;
+use defmt::{error, info};
 use panic_probe as _;
-
-// 使用 defmt 进行日志输出
-use defmt::{error, info, println};
 
 mod diagnostics;
 use diagnostics::BlueHighDiagnostics as Diag;
@@ -61,12 +57,11 @@ use crate::lora::LoraControl;
 fn main() -> ! {
   rtt_target::rtt_init_defmt!();
 
-  // 立即输出第一条日志 - 这应该总是工作
-  info!("=== Blue-High 启动 ===");
-  info!("版本: 0.1.0");
+  info!("=== Blue-High Boot ===");
+  info!("Version: 0.1.0");
   info!("MCU: STM32F103C8T6");
 
-  Diag::boot_sequence("STM32F103C8T6 初始化开始");
+  Diag::boot_sequence("STM32F103C8T6 init start");
 
   // Get access to the device specific peripherals from the peripheral access crate
   let dp = pac::Peripherals::take().unwrap();
@@ -98,7 +93,7 @@ fn main() -> ! {
   // ========================================
   // OLED Display Setup (I2C2 on PB10/PB11)
   // ========================================
-  Diag::oled_status("初始化 OLED 显示屏 (I2C2 @ PB10/PB11)");
+  Diag::oled_status("I2C2 OLED init (PB10/PB11)");
   let i2c_scl = gpiob.pb10.into_alternate_open_drain(&mut gpiob.crh);
   let i2c_sda = gpiob.pb11.into_alternate_open_drain(&mut gpiob.crh);
 
@@ -122,7 +117,7 @@ fn main() -> ! {
 
   display.init().unwrap();
 
-  Diag::oled_status("SSD1306 128x64 初始化完成");
+  Diag::oled_status("SSD1306 128x64 ready");
 
   // Create a text style
   let text_style = MonoTextStyleBuilder::new()
@@ -167,7 +162,7 @@ fn main() -> ! {
     .device_class(USB_CLASS_CDC)
     .build();
 
-  Diag::boot_sequence("USB CDC 虚拟串口已配置");
+  Diag::boot_sequence("USB CDC serial ready");
 
   // ========================================
   // E22-400M30S LoRa SPI Setup with SX1268 Driver
@@ -186,7 +181,7 @@ fn main() -> ! {
   let nss = gpioa.pa4.into_push_pull_output(&mut gpioa.crl);
   let busy = gpiob.pb1.into_floating_input(&mut gpiob.crl);
   let nrst = gpiob.pb0.into_push_pull_output(&mut gpiob.crl);
-  // DIO1 用于检测 LoRa RxDone 中断（高电平 = 收到数据包）
+  // DIO1 signals RxDone / Timeout / error IRQs from the SX1268 (active high).
   let dio1 = gpioa.pa3.into_pull_up_input(&mut gpioa.crl);
 
   // RF Switch control pins (TXEN/RXEN)
@@ -255,66 +250,75 @@ fn main() -> ! {
   lora
     .init(config.clone())
     .expect("SX1268 initialization failed");
-  Diag::boot_sequence("E22-400M30S SX1268 驱动创建完成");
+  Diag::boot_sequence("E22-400M30S SX1268 driver ready");
 
   // 打印配置信息到调试日志
   info!("╔══════════════════════════════════╗");
-  info!("║      E22-400M30S LoRa 配置       ║");
+  info!("║     E22-400M30S LoRa Config      ║");
   info!("╠══════════════════════════════════╣");
-  info!("║ 频率: {}Hz", config.get_frequency_hz());
-  info!("║ 功率: {} dBm", config.get_power_dbm());
-  info!("║ 带宽: {} kHz", config.get_bandwidth_khz());
-  info!("║ 扩频因子: SF{}", config.get_sf());
+  info!("║ Freq : {}Hz", config.get_frequency_hz());
+  info!("║ Power: {} dBm", config.get_power_dbm());
+  info!("║ BW   : {} kHz", config.get_bandwidth_khz());
+  info!("║ SF   : SF{}", config.get_sf());
   info!(
-    "║ 编码率: CR{}/{}",
+    "║ CR   : CR{}/{}",
     config.get_cr_ratio().0,
     config.get_cr_ratio().1
   );
-  info!("║ 前导码: {} 符号", config.get_preamble_length());
+  info!("║ Preamble: {} symbols", config.get_preamble_length());
   info!(
-    "║ CRC: {}",
+    "║ CRC  : {}",
     if config.get_crc_enabled() {
-      "启用"
+      "on"
     } else {
-      "禁用"
+      "off"
     }
   );
   info!(
-    "║ 头部: {}",
+    "║ Header: {}",
     if config.get_header_type() == LoRaHeaderType::Explicit {
-      "显式"
+      "explicit"
     } else {
-      "隐式"
+      "implicit"
     }
   );
   info!(
-    "║ 同步字: 0x{:02X} ({})",
+    "║ Sync : 0x{:04X} ({})",
     config.get_sync_word(),
-    if config.get_sync_word() == 0x14 {
-      "公网"
+    if config.get_sync_word() == 0x3444 {
+      "public"
     } else {
-      "私网"
+      "private"
     }
   );
   info!(
-    "║ PA 配置: duty={:02X} hp={:02X}",
+    "║ PA   : duty={:02X} hp={:02X}",
     config.get_pa_duty_cycle(),
     config.get_pa_hp_max()
   );
   info!("╚══════════════════════════════════╝");
 
+  // Send a startup test packet to verify the TX path.
   lora
     .send_lora(&[1, 2, 3, 4, 5], 0)
-    .expect("LoRa 发送测试失败");
+    .expect("LoRa startup TX failed");
 
-  // 进入持续接收模式（timeout=0xFFFFFF），等待 DIO1 指示 RxDone
-  lora.start_lora_rx(0xFFFFFF).expect("LoRa 进入接收模式失败");
-  Diag::boot_sequence("LoRa 进入持续接收模式");
+  // Wait for TxDone — DIO1 goes high when transmission completes.
+  {
+    let mut tx_wait = 0u32;
+    while !dio1.is_high() {
+      tx_wait = tx_wait.wrapping_add(1);
+      if tx_wait > 20_000_000 {
+        break;
+      }
+    }
+  }
 
-  // 初始化 SX1268 芯片
-  // let mut delay_fn = |ms: u32| delay.delay_ms(ms);
+  // Enter continuous RX mode (timeout = 0xFFFFFF → never times out).
+  lora.start_lora_rx(0xFFFFFF).expect("LoRa start_rx failed");
+  Diag::boot_sequence("LoRa entered continuous RX mode");
 
-  // Display status with configuration
+  // Display radio config on the OLED.
   display.clear(BinaryColor::Off).unwrap();
   Text::with_baseline("E22 LoRa", Point::new(0, 0), text_style, Baseline::Top)
     .draw(&mut display)
@@ -373,7 +377,7 @@ fn main() -> ! {
   .unwrap();
 
   // 显示网络类型
-  let net_type = if config.get_sync_word() == 0x14 {
+  let net_type = if config.get_sync_word() == 0x3444 {
     "Public"
   } else {
     "Private"
@@ -386,60 +390,97 @@ fn main() -> ! {
 
   delay.delay_ms(100_u32);
 
-  Diag::boot_sequence("系统初始化完成，进入主循环");
+  Diag::boot_sequence("System init complete, entering main loop");
 
-  info!("abc");
-
-  // Main loop - USB to LoRa bridge with SX1268 driver
+  // Main loop — USB ↔ LoRa bridge backed by the SX1268 driver.
   const BUFFER_SIZE: usize = 64;
   let mut usb_buf = [0u8; BUFFER_SIZE];
   let mut rx_buf = [0u8; BUFFER_SIZE];
   let mut loop_counter: u32 = 0;
 
-  info!("abc");
-              lora.start_lora_rx(0xFFFFFF).ok();
-  info!("def");
-
-  let mut x = 0;
-
-  // loop {
-  //   let recv = lora.recv_lora(&mut rx_buf);
-  //   if let Ok(Some(len)) = recv {
-  //     info!("Received LoRa packet of length {}: {:02X}", len, &rx_buf[0..len]);
-  //     loop {
-  //     }
-  //   }
-  // }
-
   loop {
-
     loop_counter = loop_counter.wrapping_add(1);
 
-    // LoRa -> USB: 通过 DIO1 引脚判断是否收到 LoRa 数据包
-    // info!("dio1 {}", dio1.is_high());
-    x += 1;
+    // USB → LoRa: forward data received on the USB serial port to the radio.
+    if usb_dev.poll(&mut [&mut serial]) {
+      match serial.read(&mut usb_buf) {
+        Ok(count) if count > 0 => {
+          Diag::usb_bridge_rx(count);
+          Diag::usb_data_received(&usb_buf[0..count]);
+          info!("[main] Sending {} bytes via LoRa", count);
 
-    if x > 100000000 {
-      x = 0;
-      info!("主循环计数: {}", loop_counter);
-      info!("dio1={}", dio1.is_high());
+          match lora.send_lora(&usb_buf[0..count], 0) {
+            Ok(_) => {
+              info!("[main] LoRa TX ok");
+              // Wait for TxDone — DIO1 goes high when transmission completes.
+              let mut tx_wait = 0u32;
+              while !dio1.is_high() {
+                tx_wait = tx_wait.wrapping_add(1);
+                if tx_wait > 20_000_000 {
+                  break;
+                }
+              }
+
+              // Update OLED display.
+              display.clear(BinaryColor::Off).unwrap();
+              Text::with_baseline("USB->LoRa", Point::new(0, 0), text_style, Baseline::Top)
+                .draw(&mut display)
+                .unwrap();
+              Text::with_baseline("TX Success", Point::new(0, 12), text_style, Baseline::Top)
+                .draw(&mut display)
+                .unwrap();
+              let mut bytes_str = heapless::String::<20>::new();
+              write!(&mut bytes_str, "{} bytes", count).ok();
+              Text::with_baseline(
+                bytes_str.as_str(),
+                Point::new(0, 24),
+                text_style,
+                Baseline::Top,
+              )
+              .draw(&mut display)
+              .unwrap();
+              display.flush().unwrap();
+
+              // Re-enter continuous RX after TX completes.
+              lora.start_lora_rx(0xFFFFFF).ok();
+            }
+            Err(_) => {
+              error!("[main] LoRa TX failed");
+              Diag::error_occurred("LoRa TX failed");
+
+              display.clear(BinaryColor::Off).unwrap();
+              Text::with_baseline("LoRa TX", Point::new(0, 0), text_style, Baseline::Top)
+                .draw(&mut display)
+                .unwrap();
+              Text::with_baseline("Failed!", Point::new(0, 12), text_style, Baseline::Top)
+                .draw(&mut display)
+                .unwrap();
+              display.flush().unwrap();
+
+              // Re-enter RX even after a TX error.
+              lora.start_lora_rx(0xFFFFFF).ok();
+            }
+          }
+        }
+        _ => {}
+      }
     }
 
-
+    // LoRa → USB: forward received packets to the USB serial port.
+    // DIO1 is high when the chip has raised an RxDone (or error) IRQ.
     if dio1.is_high() {
       let recv = lora.recv_lora(&mut rx_buf);
       match recv {
         Ok(Some(len)) => {
-          info!("[主循环] 📻 LoRa 接收到 {} 字节，转发至 USB", len);
-          info!("[主循环] 原始数据 (hex): {:02X}", &rx_buf[..len]);
-          info!("[主循环] 原始数据 (dec): {:?}", &rx_buf[..len]);
+          info!("[main] LoRa RX {} bytes, forwarding to USB", len);
+          info!("[main] RX hex: {:02X}", &rx_buf[..len]);
           if let Ok(s) = core::str::from_utf8(&rx_buf[..len]) {
-            info!("[主循环] 原始数据 (str): {}", s);
+            info!("[main] RX str: {}", s);
           } else {
-            info!("[主循环] 原始数据 (str): <non-UTF8>");
+            info!("[main] RX str: <non-UTF8>");
           }
 
-          // 将接收到的数据写入 USB 虚拟串口
+          // Write received bytes to the USB CDC serial port.
           let mut written = 0;
           while written < len {
             match serial.write(&rx_buf[written..len]) {
@@ -449,7 +490,7 @@ fn main() -> ! {
           }
           serial.flush().ok();
 
-          // 更新 OLED 显示
+          // Update OLED display.
           display.clear(BinaryColor::Off).unwrap();
           Text::with_baseline("LoRa->USB", Point::new(0, 0), text_style, Baseline::Top)
             .draw(&mut display)
@@ -457,7 +498,6 @@ fn main() -> ! {
           Text::with_baseline("RX OK", Point::new(0, 12), text_style, Baseline::Top)
             .draw(&mut display)
             .unwrap();
-          use core::fmt::Write;
           let mut rx_len_str = heapless::String::<20>::new();
           write!(&mut rx_len_str, "{} bytes", len).ok();
           Text::with_baseline(
@@ -471,88 +511,18 @@ fn main() -> ! {
           display.flush().unwrap();
         }
         Ok(None) => {
-          // DIO1 短暂高电平但 IRQ 未置位，忽略
-          // info!("[主循环] ⚠️ DIO1 高电平但无数据，可能是干扰或误触发");
+          // DIO1 glitch — IRQ cleared with no data; ignore.
         }
         Err(_) => {
-          error!("[主循环] ❌ LoRa 接收失败");
-          Diag::error_occurred("LoRa 接收失败");
+          error!("[main] LoRa RX error");
+          Diag::error_occurred("LoRa RX error");
         }
       }
-      // 持续接收模式(0xFFFFFF)下芯片每次收包后自动重新监听，无需重新调用 start_lora_rx。
-      // 重新调用会中断正在进行的 RX 并重置 buffer，导致后续包数据错误。
+      // In continuous RX mode (0xFFFFFF) the chip auto-relistens after each
+      // packet — do NOT call start_lora_rx here; it would reset the buffer
+      // and corrupt subsequent packets.
     }
 
-    // Poll USB
-    // if usb_dev.poll(&mut [&mut serial]) {
-    //   // USB -> LoRa: Read from USB and send via SX1268
-    //   match serial.read(&mut usb_buf) {
-    //     Ok(count) if count > 0 => {
-    //       Diag::usb_bridge_rx(count);
-
-    //       // 显示接收到的 USB 数据详细内容（十六进制和 ASCII）
-    //       Diag::usb_data_received(&usb_buf[0..count]);
-
-    //       // 使用 SX1268 驱动发送 LoRa 数据
-    //       info!("[主循环] 准备通过 LoRa 发送 {} 字节", count);
-
-    //       match lora.send_lora(&usb_buf[0..count], 0) {
-    //         Ok(_) => {
-    //           info!("[主循环] ✅ LoRa 发送成功");
-
-    //           // Update display
-    //           display.clear(BinaryColor::Off).unwrap();
-    //           Text::with_baseline("USB->LoRa", Point::new(0, 0), text_style, Baseline::Top)
-    //             .draw(&mut display)
-    //             .unwrap();
-    //           Text::with_baseline("TX Success", Point::new(0, 12), text_style, Baseline::Top)
-    //             .draw(&mut display)
-    //             .unwrap();
-
-    //           // 显示发送的字节数
-    //           use core::fmt::Write;
-    //           let mut bytes_str = heapless::String::<20>::new();
-    //           write!(&mut bytes_str, "{} bytes", count).ok();
-    //           Text::with_baseline(
-    //             bytes_str.as_str(),
-    //             Point::new(0, 24),
-    //             text_style,
-    //             Baseline::Top,
-    //           )
-    //           .draw(&mut display)
-    //           .unwrap();
-
-    //           display.flush().unwrap();
-
-    //           // TX 完成后重新进入持续接收模式
-    //           lora.start_lora_rx(0xFFFFFF).ok();
-    //         }
-    //         Err(_) => {
-    //           error!("[主循环] ❌ LoRa 发送失败");
-    //           Diag::error_occurred("LoRa 发送失败");
-
-    //           // Update display
-    //           display.clear(BinaryColor::Off).unwrap();
-    //           Text::with_baseline("LoRa TX", Point::new(0, 0), text_style, Baseline::Top)
-    //             .draw(&mut display)
-    //             .unwrap();
-    //           Text::with_baseline("Failed!", Point::new(0, 12), text_style, Baseline::Top)
-    //             .draw(&mut display)
-    //             .unwrap();
-    //           display.flush().unwrap();
-
-    //           // 出错后同样重新进入接收模式
-    //           lora.start_lora_rx(0xFFFFFF).ok();
-    //         }
-    //       }
-    //     }
-    //     _ => {
-    //       // 无数据，继续轮询
-    //     }
-    //   }
-    // }
-
-    // For SPI-based LoRa, data reception would require polling the module
-    // or using DIO1 interrupt. This is a simplified transmit-only example.
+    // Diag::heartbeat(loop_counter);
   }
 }

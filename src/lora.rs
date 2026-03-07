@@ -11,7 +11,7 @@
 //
 // Copyright (C) 2026 Johann Li <me@qinka.pro>, Wareless Group
 
-use core::ops::{DerefMut};
+use core::ops::DerefMut;
 
 use stm32f1xx_hal::gpio::{Input, Output, Pin};
 use stm32f1xx_hal::spi::{Instance, Spi};
@@ -20,16 +20,11 @@ use sx1268_rs::{Status, control::Control};
 #[derive(Debug)]
 pub enum ControlError<SE> {
   SpiError(SE),
-  // PinError(PE),
 }
 
 fn spi_error<SE>(error: SE) -> sx1268_rs::Error<ControlError<SE>> {
   sx1268_rs::Error::ControlError(ControlError::SpiError(error))
 }
-
-// fn pin_error<SE, PE>(error: PE) -> sx1268_rs::Error<ControlError<SE, PE>> {
-//   sx1268_rs::Error::ControlError(ControlError::PinError(error))
-// }
 
 /// Wrapper type to implement Control trait for Spi
 pub struct LoraControl<
@@ -122,22 +117,28 @@ where
   /// Read a command response.
   /// The SX1268 protocol sends a status byte after the opcode + NOP, then
   /// returns the response data.
-  fn read_command(&mut self, opcode: u8, params: &[u8], response: &mut [u8]) -> Result<Status, Self::Error> {
-    // SX1268 read command frame (全双工视角):
-    //   MOSI: [opcode] [params=NOP×m]  [NOP×response.len()]
-    //   MISO: [Status] [data_bytes...] [data_bytes...]
+  fn read_command(
+    &mut self,
+    opcode: u8,
+    params: &[u8],
+    response: &mut [u8],
+  ) -> Result<Status, Self::Error> {
+    // SX1268 read command frame (full-duplex view):
+    //   MOSI: [opcode]  [params = NOP × m]  [NOP × response.len()]
+    //   MISO: [Status]  [ignored bytes   ]  [response data       ]
     //
-    // 注意：stm32f1xx-hal 的 write() 在每次调用结束时会多读走一个 MISO 字节
-    // （用于清除 OVR 标志）。若 opcode 和 params 分两次 write() 调用，
-    // opcode 那次会读走 MISO[0]=Status，params 那次会读走 MISO[1]=data[0]，
-    // 导致实际数据偏移 1 字节。
+    // stm32f1xx-hal's `write()` reads and discards one MISO byte at the
+    // end of every call (to clear the OVR flag).  If the opcode and params
+    // were sent in two separate `write()` calls, the first would discard
+    // MISO[0] = Status and the second would discard MISO[1] = data[0],
+    // causing a one-byte shift in the received data.
     //
-    // 解决方案：用 transfer() 做完整帧，opcode+params+NOP全在一个调用里，
-    // MISO 数据从 index 1 开始（跳过 MISO[0]=Status）。
+    // Fix: use `transfer_in_place` with a single combined frame so that
+    // only one MISO byte is ever discarded.  The response bytes sit at
+    // frame[1 + params.len()..total].
     //
-    // params 在所有调用点均为 [0x00]（1字节NOP），所以帧总长 = 1 + params.len() + response.len()
-    // 为避免动态内存分配，此处硬限最大帧 = 1 + 1 + 16 = 18 字节（足够所有命令）。
-    // 所有实际命令的 params.len()=1，response.len()≤3，余量充足。
+    // All callers pass params.len() == 1 and response.len() <= 3, so the
+    // maximum frame size is 1 + 1 + 16 = 18 bytes — no heap allocation needed.
     let total = 1 + params.len() + response.len();
     assert!(total <= 18, "read_command frame too large");
     let mut frame = [0u8; 18];
@@ -146,7 +147,11 @@ where
     // frame[1+params.len()..total] 已是 0x00（NOP）
     while self.busy_pin.is_high() {}
     self.cs_pin.set_low();
-    self.spi.deref_mut().transfer_in_place(&mut frame[..total]).map_err(spi_error)?;
+    self
+      .spi
+      .deref_mut()
+      .transfer_in_place(&mut frame[..total])
+      .map_err(spi_error)?;
     self.cs_pin.set_high();
     // MISO[0] = Status（opcode 期间），MISO[1..1+params.len()] = 数据（丢弃）
     // MISO[1+params.len()..total] = response 数据
@@ -187,11 +192,6 @@ where
     self.spi.deref_mut().write(&header).map_err(spi_error)?;
     self.spi.deref_mut().read(data).map_err(spi_error)?;
     self.cs_pin.set_high();
-    // defmt::info!(
-    //   "ReadRegister addr=0x{:04X} data={:?}",
-    //   address,
-    //   data
-    // );
     Ok(())
   }
 
