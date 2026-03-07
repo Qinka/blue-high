@@ -114,7 +114,7 @@ where
     self.cs_pin.set_low();
     self.spi.deref_mut().write(&[opcode]).map_err(spi_error)?;
     self.spi.deref_mut().write(params).map_err(spi_error)?;
-    defmt::trace!("SPI write cmd=0x{:02X} params={:?}", opcode, params);
+    defmt::debug!("SPI write cmd=0x{:02X} params={:02X}", opcode, params);
     self.cs_pin.set_high();
     Ok(())
   }
@@ -122,14 +122,37 @@ where
   /// Read a command response.
   /// The SX1268 protocol sends a status byte after the opcode + NOP, then
   /// returns the response data.
-  fn read_command(&mut self, opcode: u8, response: &mut [u8]) -> Result<Status, Self::Error> {
+  fn read_command(&mut self, opcode: u8, params: &[u8], response: &mut [u8]) -> Result<Status, Self::Error> {
+    // SX1268 read command frame (全双工视角):
+    //   MOSI: [opcode] [params=NOP×m]  [NOP×response.len()]
+    //   MISO: [Status] [data_bytes...] [data_bytes...]
+    //
+    // 注意：stm32f1xx-hal 的 write() 在每次调用结束时会多读走一个 MISO 字节
+    // （用于清除 OVR 标志）。若 opcode 和 params 分两次 write() 调用，
+    // opcode 那次会读走 MISO[0]=Status，params 那次会读走 MISO[1]=data[0]，
+    // 导致实际数据偏移 1 字节。
+    //
+    // 解决方案：用 transfer() 做完整帧，opcode+params+NOP全在一个调用里，
+    // MISO 数据从 index 1 开始（跳过 MISO[0]=Status）。
+    //
+    // params 在所有调用点均为 [0x00]（1字节NOP），所以帧总长 = 1 + params.len() + response.len()
+    // 为避免动态内存分配，此处硬限最大帧 = 1 + 1 + 16 = 18 字节（足够所有命令）。
+    // 所有实际命令的 params.len()=1，response.len()≤3，余量充足。
+    let total = 1 + params.len() + response.len();
+    assert!(total <= 18, "read_command frame too large");
+    let mut frame = [0u8; 18];
+    frame[0] = opcode;
+    frame[1..1 + params.len()].copy_from_slice(params);
+    // frame[1+params.len()..total] 已是 0x00（NOP）
     while self.busy_pin.is_high() {}
     self.cs_pin.set_low();
-    self.spi.deref_mut().write(&[opcode]).map_err(spi_error)?;
-    self.spi.deref_mut().read(response).map_err(spi_error)?;
+    self.spi.deref_mut().transfer_in_place(&mut frame[..total]).map_err(spi_error)?;
     self.cs_pin.set_high();
-
-    let status = Status::from(0);
+    // MISO[0] = Status（opcode 期间），MISO[1..1+params.len()] = 数据（丢弃）
+    // MISO[1+params.len()..total] = response 数据
+    let data_start = 1 + params.len();
+    response.copy_from_slice(&frame[data_start..total]);
+    let status = Status::from(frame[0]);
     defmt::trace!(
       "SPI read cmd=0x{:02X} status={} resp={:?}",
       opcode,
@@ -153,15 +176,22 @@ where
 
   /// Read from registers starting at the given address.
   fn read_register(&mut self, address: u16, data: &mut [u8]) -> Result<(), Self::Error> {
-    let header = [0x1D, (address >> 8) as u8, address as u8];
+    // SX1268 read register frame:
+    //   MOSI: [0x1D, addr_hi, addr_lo, NOP]  [NOP × data.len()]
+    //   MISO: [x,    x,       x,       STATUS(discarded)]  [data0, data1, ...]
+    // The trailing NOP in the header causes STATUS to be clocked out and
+    // discarded by write(). data bytes follow directly after.
+    let header = [0x1D, (address >> 8) as u8, address as u8, 0x00];
     while self.busy_pin.is_high() {}
     self.cs_pin.set_low();
     self.spi.deref_mut().write(&header).map_err(spi_error)?;
     self.spi.deref_mut().read(data).map_err(spi_error)?;
     self.cs_pin.set_high();
-    defmt::info!("ReadRegister addr=0x{:04X} data={:?}", address, data);
-    // Status not reliably returned from read_register, return default
-    // Ok(Status::from(0))
+    // defmt::info!(
+    //   "ReadRegister addr=0x{:04X} data={:?}",
+    //   address,
+    //   data
+    // );
     Ok(())
   }
 
@@ -179,7 +209,12 @@ where
 
   /// Read data from the RX buffer at the given offset.
   fn read_buffer(&mut self, offset: u8, data: &mut [u8]) -> Result<(), Self::Error> {
-    let header = [sx1268_rs::codes::READ_BUFFER, offset];
+    // SX1268 read buffer frame:
+    //   MOSI: [READ_BUFFER, offset, NOP]  [NOP × data.len()]
+    //   MISO: [x,           x,     STATUS(discarded)]  [payload0, payload1, ...]
+    // The trailing NOP in the header causes STATUS to be clocked out and
+    // discarded by write(). Payload bytes follow directly after.
+    let header = [sx1268_rs::codes::READ_BUFFER, offset, 0x00];
     while self.busy_pin.is_high() {}
     self.cs_pin.set_low();
     self.spi.deref_mut().write(&header).map_err(spi_error)?;
