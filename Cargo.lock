@@ -250,9 +250,6 @@ name = "embedded-hal"
 version = "1.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "361a90feb7004eca4019fb28352a9465666b24f840f5c3cddf0ff13920590b89"
-dependencies = [
- "defmt 0.3.100",
-]
 
 [[package]]
 name = "embedded-hal-async"
@@ -592,10 +589,9 @@ dependencies = [
 [[package]]
 name = "sx1268-rs"
 version = "0.1.31"
-source = "git+https://github.com/Qinka/sx1268-rs?branch=main#91cb04337c945908a684b91b3ad8b7f01f348851"
+source = "git+https://github.com/Qinka/sx1268-rs?branch=main#c808d4b26702e4de5609fdc0a2dbc99f76f322ef"
 dependencies = [
  "defmt 1.0.1",
- "embedded-hal 1.0.0",
 ]
 
 [[package]]

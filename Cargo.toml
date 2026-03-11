@@ -34,7 +34,7 @@ heapless = "0.9"
 
 
 # SX1268 LoRa
-sx1268-rs = { git = "https://github.com/Qinka/sx1268-rs", branch = "main" }
+sx1268-rs = { git = "https://github.com/Qinka/sx1268-rs", branch = "main",features = ["no_std"] }
 
 
 [profile.dev]
