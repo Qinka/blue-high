@@ -229,7 +229,7 @@ where
     let mut status_byte = [0u8; 1];
     while self.busy_pin.is_high() {}
     self.cs_pin.set_low();
-    self.spi.deref_mut().write(&[0xC0]).map_err(spi_error)?;
+    self.spi.deref_mut().write(&[sx1268_rs::codes::GET_STATUS]).map_err(spi_error)?;
     self
       .spi
       .deref_mut()
